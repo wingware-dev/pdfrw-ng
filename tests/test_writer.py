@@ -290,6 +290,54 @@ def test_addpage_at_index_must_be_an_integer(at_index):
     assert len(writer.pagearray) == 3
 
 
+# -- PdfWriter.addpages(pagelist, at_index) ---------------------------------
+
+def extra_pages():
+    return PdfReader(fdata=make_pdf(2, labels=['X1', 'X2'])).pages
+
+
+@pytest.mark.parametrize('at_index, position', [
+    (None, 3), (0, 0), (1, 1), (3, 3), (-1, 2), (-3, 0)])
+def test_addpages_at_index(at_index, position):
+    writer, _ = two_writers()
+    pages = iter(extra_pages())         # Any iterable, not only a list.
+    assert writer.addpages(pages, at_index=at_index) is writer
+    expected = list(TEXTS)
+    expected[position:position] = ['X1', 'X2']
+    assert_valid(write_bytes(writer), texts=expected)
+
+
+def test_addpages_at_index_into_empty_writer():
+    writer = PdfWriter().addpages(extra_pages(), at_index=0)
+    assert_valid(write_bytes(writer), texts=['X1', 'X2'])
+
+
+def test_addpages_at_index_empty_list():
+    writer, _ = two_writers()
+    writer.addpages([], at_index=-1)
+    assert_valid(write_bytes(writer), texts=TEXTS)
+
+
+@pytest.mark.parametrize('at_index, error', [
+    (4, IndexError), (-4, IndexError), (1.0, TypeError)])
+def test_addpages_bad_at_index_adds_nothing(at_index, error):
+    writer, _ = two_writers()
+    pages = extra_pages()
+    with pytest.raises(error):
+        writer.addpages(pages, at_index=at_index)
+    assert len(writer.pagearray) == 3
+    assert not any(id(page) in writer.killobj for page in pages)
+
+
+def test_addpages_at_index_bad_page_adds_nothing():
+    writer, _ = two_writers()
+    pages = list(extra_pages()) + [PdfDict(Type=PdfName.Pages)]
+    with pytest.raises(PdfOutputError):
+        writer.addpages(pages, at_index=0)
+    assert len(writer.pagearray) == 3
+    assert_valid(write_bytes(writer), texts=TEXTS)
+
+
 # -- upstream PR #205: PdfWriter.Pages ----------------------------------------
 
 def bare_page(text):

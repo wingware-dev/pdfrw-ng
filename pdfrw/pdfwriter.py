@@ -435,9 +435,36 @@ class PdfWriter(object):
 
     addPage = addpage  # for compatibility with pyPdf
 
-    def addpages(self, pagelist):
+    def addpages(self, pagelist, at_index=None):
+        ''' Add each page of `pagelist`, in order, and return self.
+
+            With `at_index` None (the default) the pages go after the
+            pages added so far.  Otherwise they go, in order, before the
+            page now at `at_index`, by the same rules as addpage(): an
+            index from minus to plus the number of pages added so far,
+            negative counting from the end.  With `at_index`, the index
+            and every page's /Type are checked first, so on IndexError,
+            TypeError or PdfOutputError no page is added.
+        '''
+        if at_index is None:
+            for page in pagelist:
+                self.addpage(page)
+            return self
+
+        count = len(self.pagearray)
+        at_index = operator.index(at_index)
+        if not -count <= at_index <= count:
+            raise IndexError('at_index %d is out of range for %d pages'
+                             % (at_index, count))
+        if at_index < 0:
+            at_index += count
+        pagelist = list(pagelist)
         for page in pagelist:
-            self.addpage(page)
+            if page.Type != PdfName.Page:
+                raise PdfOutputError('Bad /Type:  Expected %s, found %s'
+                                     % (PdfName.Page, page.Type))
+        for offset, page in enumerate(pagelist):
+            self.addpage(page, at_index=at_index + offset)
         return self
 
     def _get_trailer(self):
