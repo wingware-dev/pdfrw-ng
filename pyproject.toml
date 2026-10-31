@@ -12,6 +12,23 @@ license-files = ["LICENSE.txt"]
 requires-python = ">=3.11"
 authors = [
     { name = "Patrick Maupin", email = "pmaupin@gmail.com" },
+    # The other authors listed in LICENSE.txt
+    { name = "Mathieu Fenniak" },
+    { name = "Attila Tajti" },
+    { name = "Nerijus Mika" },
+    { name = "Bastien Gandouet" },
+    { name = "Tzerjen Wei" },
+    { name = "Jorj X. McKie" },
+    { name = "Nicholas Devenish" },
+    { name = "Jonatan Dellagostin" },
+    { name = "Thomas Kluyver" },
+    { name = "James Laird-Wah" },
+    { name = "Marcus Brinkmann" },
+    { name = "Edward Betts" },
+    { name = "Patrick Mazulo" },
+    { name = "Haochen Wu" },
+    { name = "Jon Lund Steffensen" },
+    { name = "Henddher Pedroza" },
 ]
 keywords = ["pdf", "vector graphics", "nup", "watermark", "split", "join", "merge"]
 classifiers = [

@@ -1,29 +1,99 @@
 ==================
-pdfrw 0.4
+pdfrw-ng 0.5.0
 ==================
 
-:Author: Patrick Maupin
+:Author: Patrick Maupin and the pdfrw contributors (see Credits_)
+
+**pdfrw-ng** is a maintained fork of `pdfrw`__, the pure-Python PDF
+reader and writer written by Patrick Maupin.  Upstream pdfrw's last
+release was 0.4 (September 2017) and its last commit was in February
+2018.  This fork brings it up to date with current Python and fixes
+bugs reported upstream, keeping the public API compatible: existing
+code only has to change the package it installs.  The import name is
+still ``pdfrw``.
+
+__ https://github.com/pmaupin/pdfrw
 
 .. contents::
     :backlinks: none
 
 .. sectnum::
 
+Installation
+============
+
+pdfrw-ng **is not published on PyPI**.  Install it from a copy of
+this source tree.
+
+Because the import name is still ``pdfrw``, pdfrw-ng cannot be
+installed alongside upstream ``pdfrw`` or the separate ``pdfrw2``
+fork: they would overwrite each other's files.  Uninstall them first:
+
+.. code-block:: bash
+
+    $ pip uninstall pdfrw pdfrw2
+    $ cd path/to/pdfrw-ng
+    $ pip install .
+
+To read encrypted PDFs that use AES, also install the optional
+``crypto`` extra, which pulls in pycryptodome:
+
+.. code-block:: bash
+
+    $ pip install ".[crypto]"
+
+pdfrw-ng has no other runtime dependencies.  It uses `reportlab`_
+only in the examples and modules that work with reportlab.
+
+Supported Python versions
+-------------------------
+
+pdfrw-ng requires Python 3.11 or later.  It is tested on CPython 3.11,
+3.12, 3.13, 3.14 and 3.15 and on PyPy 3.11, on Linux, macOS and
+Windows.  Python 2 and older Python 3 versions are no longer
+supported; use upstream pdfrw 0.4 for those.
+
+What changed from pdfrw 0.4
+---------------------------
+
+* Packaging moved to ``pyproject.toml``, and the distribution is named
+  ``pdfrw-ng``.  The version is 0.5.0.
+* The test suite runs offline.  Tests build their own PDFs instead of
+  using the external static_pdfs collection, and check pdfrw's output
+  with independent tools (qpdf through pikepdf, pypdf, and PDFium
+  through pypdfium2), not only by reading it back with pdfrw.
+* Bugs reported on the upstream issue tracker are being fixed, each
+  with a regression test.  They include reading files that pdfrw
+  misread or lost pages from, writing files that were broken or
+  incomplete, encrypted files, and fixes to the examples.
+
+`CHANGELOG.md`__ lists each change, with the upstream issue number it
+fixes.
+
+__ CHANGELOG.md
+
+About the name
+--------------
+
+The fork needs its own distribution name, since ``pdfrw`` belongs to
+the upstream project and ``pdfrw2`` is taken by another fork.  Other
+free names considered were ``pdfrw-next``, ``pdfrw-community`` and
+``pdfrw3``.
+
 Introduction
 ============
 
 **pdfrw** is a Python library and utility that reads and writes PDF files:
 
-* Version 0.4 is tested and works on Python 2.6, 2.7, 3.3, 3.4, 3.5, and 3.6
 * Operations include subsetting, merging, rotating, modifying metadata, etc.
 * The fastest pure Python PDF parser available
 * Has been used for years by a printer in pre-press production
 * Can be used with rst2pdf to faithfully reproduce vector images
-* Can be used either standalone, or in conjunction with `reportlab`__
+* Can be used either standalone, or in conjunction with `reportlab`_
   to reuse existing PDFs in new ones
 * Permissively licensed
 
-__ http://www.reportlab.org/
+.. _reportlab: https://www.reportlab.com/opensource/
 
 
 pdfrw will faithfully reproduce vector formats without
@@ -47,7 +117,9 @@ All examples
 
 The examples directory has a few scripts which use the library.
 Note that if these examples do not work with your PDF, you should
-try to use pdftk to uncompress and/or unencrypt them first.
+try to use pdftk or qpdf to uncompress and/or unencrypt them first.
+The examples whose names start with ``rl1/`` or ``rl2/`` also need
+reportlab (``pip install reportlab``).
 
 * `4up.py`__ will shrink pages down and place 4 of them on
   each output page.
@@ -82,23 +154,23 @@ try to use pdftk to uncompress and/or unencrypt them first.
   version in a more professional and pratical way ( take a look at
   http://www.wikihow.com/Bind-a-Book )
 
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/4up.py
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/alter.py
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/booklet.py
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/cat.py
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/extract.py
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/poster.py
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/print_two.py
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/rotate.py
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/subset.py
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/unspread.py
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/watermark.py
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/rl1/4up.py
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/rl1/booklet.py
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/rl1/subset.py
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/rl1/platypus_pdf_template.py
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/rl2/
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/subset_booklets.py
+__ examples/4up.py
+__ examples/alter.py
+__ examples/booklet.py
+__ examples/cat.py
+__ examples/extract.py
+__ examples/poster.py
+__ examples/print_two.py
+__ examples/rotate.py
+__ examples/subset.py
+__ examples/unspread.py
+__ examples/watermark.py
+__ examples/rl1/4up.py
+__ examples/rl1/booklet.py
+__ examples/rl1/subset.py
+__ examples/rl1/platypus_pdf_template.py
+__ examples/rl2/
+__ examples/subset_booklets.py
 
 Notes on selected examples
 ------------------------------------
@@ -114,7 +186,7 @@ But that assumes several things, including that the personnel know how
 to operate the hardware and software. `booklet.py`__ lets you turn your PDF
 into a preformatted booklet, to give them fewer chances to mess it up.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/booklet.py
+__ examples/booklet.py
 
 Adding or modifying metadata
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -123,12 +195,12 @@ The `cat.py`__ example will accept multiple input files on the command
 line, concatenate them and output them to output.pdf, after adding some
 nonsensical metadata to the output PDF file.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/cat.py
+__ examples/cat.py
 
 The `alter.py`__ example alters a single metadata item in a PDF,
 and writes the result to a new PDF.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/alter.py
+__ examples/alter.py
 
 
 One difference is that, since **cat** is creating a new PDF structure,
@@ -150,7 +222,7 @@ or just waste half your paper.
 The `print_two.py`__ example program will, for example, make two side-by-side
 copies each page of of your PDF on a each output sheet.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/print_two.py
+__ examples/print_two.py
 
 But, every other page is flipped, so that you can print double-sided and
 the pages will line up properly and be pre-collated.
@@ -168,7 +240,7 @@ decodegraphics is really more than a proof of concept than anything
 else. For most cases, just use the Form XObject capability, as shown in
 the examples/rl1/booklet.py demo.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/examples/rl2/copy.py
+__ examples/rl2/copy.py
 
 pdfrw philosophy
 ==================
@@ -370,7 +442,11 @@ Even as a pure PDF container library, pdfrw comes up a bit short. It
 does not currently support:
 
 -  Most compression/decompression filters
--  encryption
+-  Many forms of encryption (``PdfReader(..., decrypt=True)`` handles
+   only some standard security handlers; see `CHANGELOG.md`__ for
+   what this fork has added)
+
+__ CHANGELOG.md
 
 `pdftk`__ is a wonderful command-line
 tool that can convert your PDFs to remove encryption and compression.
@@ -386,15 +462,14 @@ Library internals
 Introduction
 ------------
 
-**pdfrw** currently consists of 19 modules organized into a main
-package and one sub-package.
+**pdfrw** consists of a main package and one sub-package.
 
 The `__init.py__`__ module does the usual thing of importing a few
 major attributes from some of the submodules, and the `errors.py`__
 module supports logging and exception generation.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/__init__.py
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/errors.py
+__ pdfrw/__init__.py
+__ pdfrw/errors.py
 
 
 PDF object model support
@@ -417,8 +492,8 @@ allows PDF files to contain internal circular references.  This latter
 capability is used, for example, when each page object has a "parent"
 object in its dictionary.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/objects/
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/objects/__init__.py
+__ pdfrw/objects/
+__ pdfrw/objects/__init__.py
 
 Ordinary objects
 ~~~~~~~~~~~~~~~~
@@ -427,7 +502,7 @@ The `objects/pdfobject.py`__ module contains the PdfObject class, which is
 a subclass of str, and is the catch-all object for any PDF file elements
 that are not explicitly represented by other objects, as described below.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/objects/pdfobject.py
+__ pdfrw/objects/pdfobject.py
 
 Name objects
 ~~~~~~~~~~~~
@@ -443,7 +518,7 @@ returned from PdfName, and the object returned from PdfObject.  The
 PdfName objects are actually objects of class "BasePdfName".  This
 is important, because only these may be used as keys in PdfDict objects.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/objects/pdfname.py
+__ pdfrw/objects/pdfname.py
 
 String objects
 ~~~~~~~~~~~~~~
@@ -453,7 +528,7 @@ module contains the PdfString class, which is a subclass of str that is
 used to represent encoded strings in a PDF file. The class has encode
 and decode methods for the strings.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/objects/pdfstring.py
+__ pdfrw/objects/pdfstring.py
 
 
 Array objects
@@ -467,7 +542,7 @@ to be set, and also allows for proxying of unresolved indirect objects
 (that haven't been read in yet) in a manner that is transparent to pdfrw
 clients.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/objects/pdfarray.py
+__ pdfrw/objects/pdfarray.py
 
 Dict objects
 ~~~~~~~~~~~~
@@ -491,7 +566,7 @@ files more closely:
 * Support for searching parent dictionaries for PDF "inheritable"
   attributes.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/objects/pdfdict.py
+__ pdfrw/objects/pdfdict.py
 
 If a PdfDict has an associated data stream in the PDF file, the stream
 is accessed via the 'stream' (all lower-case) attribute.  Setting the
@@ -528,7 +603,7 @@ should never see one of these -- they exist inside the PdfArray and PdfDict
 container types, but are resolved before being returned to a client of
 those types.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/objects/pdfindirect.py
+__ pdfrw/objects/pdfindirect.py
 
 
 File reading, tokenization and parsing
@@ -539,8 +614,8 @@ contains the PdfReader class, which can read a PDF file (or be passed a
 file object or already read string) and parse it. It uses the PdfTokens
 class in `tokens.py`__  for low-level tokenization.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/pdfreader.py
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/tokens.py
+__ pdfrw/pdfreader.py
+__ pdfrw/tokens.py
 
 
 The PdfReader class does not, in general, parse into containers (e.g.
@@ -558,9 +633,11 @@ for decompressing all the objects in the file.  pdfrw does not currently
 have very many options for decompression, so this is not all that useful,
 except in the specific case of compressed object streams.
 
-Also, there are no options for decryption yet.  If you have PDF files
-that are encrypted or heavily compressed, you may find that using another
-program like pdftk on them can make them readable by pdfrw.
+Passing ``decrypt=True`` (with ``password=`` if the file needs one)
+decrypts files that use the standard security handlers pdfrw supports.
+If you have PDF files that are encrypted in other ways or heavily
+compressed, you may find that using another program like pdftk or qpdf
+on them can make them readable by pdfrw.
 
 In general, the objects are read from the file lazily, but this is not
 currently true with compressed object streams -- all of these are decompressed
@@ -573,7 +650,7 @@ File output
 `pdfwriter.py`__
 contains the PdfWriter class, which can create and output a PDF file.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/pdfwriter.py
+__ pdfrw/pdfwriter.py
 
 There are a few options available when creating and using this class.
 
@@ -598,16 +675,16 @@ pages.  These may be reused in new PDFs essentially as if they were images.
 buildxobj is careful to cache any page used so that it only appears in
 the output once.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/buildxobj.py
+__ pdfrw/buildxobj.py
 
 
 `toreportlab.py`__
 provides the makerl function, which will translate pdfrw objects into a
-format which can be used with `reportlab <http://www.reportlab.org/>`__.
+format which can be used with `reportlab`_.
 It is normally used in conjunction with buildxobj, to be able to reuse
 parts of existing PDFs when using reportlab.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/toreportlab.py
+__ pdfrw/toreportlab.py
 
 
 `pagemerge.py`__ builds on the foundation laid by buildxobj.  It
@@ -616,7 +693,7 @@ using one or more rectangles from other pages.  There are examples
 showing its use for watermarking, scaling, 4-up output, splitting
 each page in 2, etc.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/pagemerge.py
+__ pdfrw/pagemerge.py
 
 `findobjs.py`__ contains code that can find specific kinds of objects
 inside a PDF file.  The extract.py example uses this module to create
@@ -624,7 +701,7 @@ a new PDF that places each image and Form XObject from a source PDF onto
 its own page, e.g. for easy reuse with some of the other examples or
 with reportlab.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/findobjs.py
+__ pdfrw/findobjs.py
 
 
 Miscellaneous
@@ -636,44 +713,45 @@ currently supported, so an external tool like pdftk might be good if you
 require the ability to decompress (or, for that matter, decrypt) PDF
 files.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/compress.py
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/uncompress.py
+__ pdfrw/compress.py
+__ pdfrw/uncompress.py
 
 
 `py23_diffs.py`__ contains code to help manage the differences between
 Python 2 and Python 3.
 
-__ https://github.com/pmaupin/pdfrw/tree/master/pdfrw/py23_diffs.py
+__ pdfrw/py23_diffs.py
 
 Testing
 ===============
 
-The tests associated with pdfrw require a large number of PDFs,
-which are not distributed with the library.
+The tests need no external PDFs and no network access.  Each test
+builds the PDFs it needs (with ``tests/pdfgen.py``), and checks pdfrw's
+output with independent tools (``tests/validate.py``): qpdf through
+pikepdf, pypdf, and PDFium through pypdfium2.  Network connections are
+blocked while the tests run.
 
-To run the tests:
-
-* Download or clone the full package from github.com/pmaupin/pdfrw
-* cd into the tests directory, and then clone the package
-  github.com/pmaupin/static_pdfs into a subdirectory (also named
-  static_pdfs).
-* Now the tests may be run from tests directory using unittest, or
-  py.test, or nose.
-* travisci is used at github, and runs the tests with py.test
+From the top of the source tree, in a virtual environment, install
+pdfrw-ng in editable mode with the ``test`` dependency group, then run
+pytest.  ``--group`` needs pip 25.1 or later.
 
 .. code-block:: bash
-    $ pip install pytest
-    $ pip install reportlab
-    $ pwd
-    <...>/pdfrw/tests
-    $ git clone https://github.com/pmaupin/static_pdfs
-    $ ln -s ../pdfrw
+
+    $ python -m pip install --upgrade pip
+    $ pip install --group test -e ".[crypto]"
     $ pytest
 
-To run a single test-case:
+Warnings are treated as errors, so a new DeprecationWarning or
+SyntaxWarning from pdfrw fails the suite.  To run one test file or
+one test:
 
 .. code-block:: bash
-    $ pytest test_roundtrip.py -k "test_compress_9f98322c243fe67726d56ccfa8e0885b.pdf"
+
+    $ pytest tests/test_pdfstring.py
+    $ pytest tests/test_pdfstring.py -k encode
+
+GitHub Actions (``.github/workflows/ci.yml``) runs the suite with
+coverage on Linux, macOS and Windows for every supported Python.
 
 Other libraries
 =====================
@@ -681,12 +759,13 @@ Other libraries
 Pure Python
 -----------
 
--  `reportlab <http://www.reportlab.org/>`__
+-  `reportlab`_
 
     reportlab is must-have software if you want to programmatically
     generate arbitrary PDFs.
 
--  `pyPdf <https://github.com/mstamy2/PyPDF2>`__
+-  `pypdf <https://github.com/py-pdf/pypdf>`__ (formerly pyPdf and
+   PyPDF2)
 
     pyPdf is, in some ways, very full-featured. It can do decompression
     and decryption and seems to know a lot about items inside at least
@@ -708,7 +787,7 @@ Pure Python
     My understanding is that pagecatcher would have done exactly what I
     wanted when I built pdfrw. But I was on a zero budget, so I've never
     had the pleasure of experiencing pagecatcher. I do, however, use and
-    like `reportlab <http://www.reportlab.org/>`__ (open source, from
+    like `reportlab`_ (open source, from
     the people who make pagecatcher) so I'm sure pagecatcher is great,
     better documented and much more full-featured than pdfrw.
 
@@ -747,10 +826,54 @@ Other tools
    that also comes with some command line tools. One of those, ``mutool``, has big overlaps with pdftk's - 
    except it is up to 10 times faster.
 
+Credits
+=======
+
+pdfrw was created by **Patrick Maupin**, who wrote the majority of it
+and maintained it from 2006 to 2018.  pdfrw-ng is his work, carried
+forward; please direct thanks for pdfrw itself to him.
+
+Some of the decompression code was based on the decompressor from
+PyPDF2, written by **Mathieu Fenniak**.
+
+The other authors listed in `LICENSE.txt`__ contributed to upstream
+pdfrw:
+
+__ LICENSE.txt
+
+* Attila Tajti
+* Nerijus Mika
+* Bastien Gandouet
+* Tzerjen Wei
+* Jorj X. McKie
+* Nicholas Devenish
+* Jonatan Dellagostin
+* Thomas Kluyver
+* James Laird-Wah
+* Marcus Brinkmann
+* Edward Betts
+* Patrick Mazulo
+* Haochen Wu
+* Jon Lund Steffensen
+* Henddher Pedroza
+
+License
+=======
+
+pdfrw-ng is distributed under the same terms as pdfrw: the MIT license,
+with the parts derived from PyPDF2 under the BSD license.  Both are
+reproduced, unchanged, in `LICENSE.txt`__.
+
+__ LICENSE.txt
+
 Release information
 =======================
 
-Revisions:
+Changes in pdfrw-ng are listed in `CHANGELOG.md`__.
+
+__ CHANGELOG.md
+
+Upstream pdfrw revisions:
 
 0.4 -- Released 18 September, 2017
 
