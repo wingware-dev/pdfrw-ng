@@ -20,28 +20,12 @@ booklets. The reason is: professional printing works this way:
 import sys
 import os
 import time
-from pdfrw import PdfReader, PdfWriter, PageMerge, PdfArray
+from pdfrw import PdfReader, PdfWriter
+
+from pagetools import max_page_size, side_by_side
 
 BOOKLET_SIZE = 20
 START = time.time()
-
-
-def fixpage(left, right, size):
-    """ Put two pages side by side on one sheet.  Either may be None
-        (a blank half); `size` is the (width, height) of one half.
-    """
-    result = PageMerge()
-    for x, page in ((0, left), (size[0], right)):
-        if page is not None:
-            result.add(page)
-            result[-1].x = x
-    result.mbox = PdfArray([0, 0, 2 * size[0], size[1]])
-    return result.render()
-
-
-def page_size(page):
-    rect = PageMerge().add(page)[0]
-    return rect.w, rect.h
 
 
 def booklet(ipages, size):
@@ -49,11 +33,11 @@ def booklet(ipages, size):
     ipages = list(ipages)
     opages = []
     while len(ipages) > 2:
-        opages.append(fixpage(ipages.pop(), ipages.pop(0), size))
-        opages.append(fixpage(ipages.pop(0), ipages.pop(), size))
+        opages.append(side_by_side(ipages.pop(), ipages.pop(0), size))
+        opages.append(side_by_side(ipages.pop(0), ipages.pop(), size))
     if ipages:
         # Two pages left: one side of a sheet whose other side is blank
-        opages.append(fixpage(ipages.pop(), ipages.pop(0), size))
+        opages.append(side_by_side(ipages.pop(), ipages.pop(0), size))
     return opages
 
 
@@ -63,7 +47,7 @@ ALL_IPAGES = PdfReader(INPFN).pages
 print('The pdf file %s has %d pages.' % (INPFN, len(ALL_IPAGES)))
 if not ALL_IPAGES:
     raise SystemExit('Nothing to do')
-SIZE = tuple(max(dims) for dims in zip(*(page_size(x) for x in ALL_IPAGES)))
+SIZE = max_page_size(ALL_IPAGES)
 
 #Make sure we have an even number
 if len(ALL_IPAGES) & 1:

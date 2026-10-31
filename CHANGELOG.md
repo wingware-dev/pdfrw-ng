@@ -192,6 +192,10 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
 - New `make_sample.py` writes `build/sample.pdf`, a numbered sample to
   try the other examples on, using the test suite's PDF builder (needs a
   source checkout).
+- Page-range parsing and two-up layout shared by `booklet.py`,
+  `rotate.py`, `subset.py` and `subset_booklets.py` moved into a new
+  helper module, `examples/pagetools.py`. The scripts' command lines and
+  output are unchanged.
 
 ### Packaging
 

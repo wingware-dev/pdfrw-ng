@@ -18,6 +18,10 @@ subset.py -- This will retrieve a subset of pages from a document.
 
 watermark.py  -- Adds a watermark to a PDF
 
+pagetools.py -- Not an example: page-range parsing and two-up layout
+                shared by booklet.py, rotate.py, subset.py and
+                subset_booklets.py.
+
 rl1/4up.py -- Same as 4up.py, using reportlab for output.  Next simplest reportlab example.
 
 rl1/booklet.py -- Version of print_booklet using reportlab for output.

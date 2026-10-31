@@ -14,6 +14,7 @@ that a script crops away does not count.  Generated pages show
 "Page N" near the top left of a 612x792 page.
 """
 
+import io
 import os
 import subprocess
 import sys
@@ -333,6 +334,41 @@ def test_make_sample(work):
 ])
 def test_make_sample_refuses(work, args, message):
     assert_refused(work.run('make_sample.py', *args, ok=False), message)
+
+
+@pytest.fixture
+def pagetools(monkeypatch):
+    """examples/pagetools.py, imported as the example scripts import it."""
+    monkeypatch.syspath_prepend(EXAMPLES)
+    import pagetools
+    return pagetools
+
+
+def test_pagetools_parse_ranges(pagetools):
+    assert pagetools.parse_ranges(['1-3', '5', '4-2'], 5) == [
+        range(1, 4), range(5, 6), range(4, 1, -1)]
+    assert [list(r) for r in pagetools.parse_ranges(['4-2'], 5)] == [
+        [4, 3, 2]]
+    for text in ('0', '6', '1-6', '', 'x', '1-2-3', '-1'):
+        with pytest.raises(SystemExit):
+            pagetools.parse_range(text, 5)
+
+
+def test_pagetools_side_by_side(pagetools):
+    from pdfrw import PdfReader, PdfWriter
+    pages = PdfReader(fdata=make_pdf(2)).pages
+    size = pagetools.max_page_size(pages)
+    assert size == (WIDTH, HEIGHT)
+    writer = PdfWriter()
+    writer.addpages([pagetools.side_by_side(None, pages[0], size),
+                     pagetools.side_by_side(pages[1], None, size),
+                     pagetools.side_by_side(None, None, size)])
+    out = io.BytesIO()
+    writer.write(out)
+    data = out.getvalue()
+    assert_valid(data, pages=3)
+    assert page_layout(data) == [sheet(None, 1), sheet(2, None),
+                                 sheet(None, None)]
 
 
 def test_unspread(work):

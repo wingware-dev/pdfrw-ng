@@ -21,25 +21,9 @@ blank side.
 import os
 import argparse
 
-from pdfrw import PdfReader, PdfWriter, PageMerge, PdfArray
+from pdfrw import PdfReader, PdfWriter
 
-
-def fixpage(left, right, size):
-    """ Put two pages side by side on one sheet.  Either may be None
-        (a blank half); `size` is the (width, height) of one half.
-    """
-    result = PageMerge()
-    for x, page in ((0, left), (size[0], right)):
-        if page is not None:
-            result.add(page)
-            result[-1].x = x
-    result.mbox = PdfArray([0, 0, 2 * size[0], size[1]])
-    return result.render()
-
-
-def page_size(page):
-    rect = PageMerge().add(page)[0]
-    return rect.w, rect.h
+from pagetools import max_page_size, side_by_side
 
 
 parser = argparse.ArgumentParser()
@@ -61,15 +45,15 @@ if not ipages:
     raise SystemExit('%s has no pages' % inpfn)
 
 # Each half sheet is as big as the largest input page
-size = tuple(max(dims) for dims in zip(*(page_size(x) for x in ipages)))
+size = max_page_size(ipages)
 
 # Make sure we have a correct number of sides
 ipages += [None]*(-len(ipages)%pad_to)
 
 opages = []
 while len(ipages) > 2:
-    opages.append(fixpage(ipages.pop(), ipages.pop(0), size))
-    opages.append(fixpage(ipages.pop(0), ipages.pop(), size))
+    opages.append(side_by_side(ipages.pop(), ipages.pop(0), size))
+    opages.append(side_by_side(ipages.pop(0), ipages.pop(), size))
 
 # Without padding, a page count of 2 mod 4 leaves the two middle sides,
 # which go on a single leaf in their original size.  A one-page input
