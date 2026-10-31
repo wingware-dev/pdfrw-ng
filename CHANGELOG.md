@@ -135,6 +135,14 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   where pdfrw warnings go. `pdfrw.errors.handler` and
   `pdfrw.errors.fmt` still exist but are no longer attached by default;
   `log.addHandler(pdfrw.errors.handler)` restores the old output (#230).
+- `pagexobj` keeps a page's content compressed when the page's
+  `/Contents` is an array of compressed streams. Before, the joined
+  Form XObject was written uncompressed even with
+  `allow_compressed=True`.
+- A fractional `viewrect` whose four numbers are all equal, such as
+  `0.5,0.5,0.5,0.5` for the bottom-right quarter of the page, is read as
+  fractions, as documented. Before, it was read as points and gave a
+  box half a point wide.
 
 ### Examples
 

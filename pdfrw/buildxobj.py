@@ -147,8 +147,9 @@ def getrects(inheritable, pageinfo, rotation):
         mleft, mbot, mright, mtop = rotate_rect(cbox, rotation)
         x, y, w, h = vrect
 
-        # Support operations in fractions of a page
-        if 0 <= min(vrect) < max(vrect) <= 1:
+        # Support operations in fractions of a page.  Every number in
+        # [0, 1] means fractions, even when all four are equal.
+        if 0 <= min(vrect) and max(vrect) <= 1:
             mw = mright - mleft
             mh = mtop - mbot
             x *= mw
@@ -213,7 +214,7 @@ def _build_cache(contents, allow_compressed):
         assert newlength == len(newstream)
         xobj_copy.stream = newstream
         if was_compressed and allow_compressed:
-            compress(xobj_copy)
+            compress([xobj_copy])
 
     return xobj_copy
 
