@@ -1081,3 +1081,118 @@ class PdfReader(PdfDict):
     # For compatibility with pyPdf
     def getPage(self, pagenum):
         return self.pages[pagenum]
+
+    def _page_tree_root(self):
+        ''' The top /Pages node of the page tree readpages() read, or
+            None.
+        '''
+        root = self.Root
+        if not isinstance(root, PdfDict):
+            return None
+        if root.Kids is None:
+            root = root.Pages
+        if isinstance(root, PdfDict) and isinstance(root.Kids, list):
+            return root
+        return None
+
+    @staticmethod
+    def _iter_page_paths(root):
+        ''' Yield (page, path) for each page under the /Pages node `root`,
+            in order, where path is a list of [node, kid index] pairs
+            from `root` down to the page's parent.  The list is reused:
+            copy it to keep it.  Nodes are taken as readpages() left them,
+            and anything it would skip is skipped.
+        '''
+        pagename = PdfName.Page
+        path = [[root, -1]]
+        while path:
+            entry = path[-1]
+            kids = entry[0].Kids
+            entry[1] += 1
+            if entry[1] >= len(kids):
+                path.pop()
+                continue
+            kid = kids[entry[1]]
+            if not isinstance(kid, PdfDict):
+                continue
+            if kid.Type == pagename:
+                yield kid, path
+            elif (isinstance(kid.Kids, list) and
+                    not any(node is kid for node, _ in path)):
+                path.append([kid, -1])
+
+    @staticmethod
+    def _recount_pages(node, done=None):
+        ''' Set /Count on /Pages `node` and every /Pages node under it to
+            the number of pages under it, as readpages() would find them,
+            and return node's count.  `done` maps id() of nodes already
+            counted to their counts.
+        '''
+        if done is None:
+            done = {}
+        key = id(node)
+        if key in done:
+            return done[key]
+        done[key] = 0       # A loop counts nothing.
+        total = 0
+        pagename = PdfName.Page
+        for kid in node.Kids:
+            if not isinstance(kid, PdfDict):
+                continue
+            if kid.Type == pagename:
+                total += 1
+            elif isinstance(kid.Kids, list):
+                total += PdfReader._recount_pages(kid, done)
+        done[key] = total
+        node.Count = PdfObject(total)
+        return total
+
+    def remove_page(self, index):
+        ''' Remove page `index` of self.pages (negative counts from the
+            end) from the document's page tree, and return self, so that
+            the reader can be written without the page:
+
+                reader = PdfReader('in.pdf')
+                PdfWriter('out.pdf', trailer=reader.remove_page(1)).write()
+
+            The page is taken out of its parent's /Kids, at any depth in
+            the tree.  A /Pages node left with no kids is removed from its
+            own parent in turn (the top node is kept), and /Count is
+            recomputed on every /Pages node.  self.pages and
+            numPages are updated in place.  If the page's parent is a
+            /Pages node listed more than once in the tree, the page goes
+            from each place it was listed.
+
+            Raises IndexError if there is no such page.
+        '''
+        pages = self.pages
+        page = pages[index]
+        if index < 0:
+            index += len(pages)
+
+        root = self._page_tree_root()
+        path = None
+        if root is not None:
+            for position, (leaf, leafpath) in enumerate(
+                    self._iter_page_paths(root)):
+                if position == index:
+                    if leaf is page:
+                        path = [list(entry) for entry in leafpath]
+                    break
+        if path is None:
+            raise ValueError('Page %d is not where the page tree has it; '
+                             'was the tree changed after reading?' % index)
+
+        node, position = path.pop()
+        node.Kids.pop(position)
+        while path and not node.Kids:
+            node, position = path.pop()
+            node.Kids.pop(position)
+
+        # Recount the whole tree: a shared /Pages node can have
+        # ancestors that are not on `path`.
+        self._recount_pages(root)
+
+        pages[:] = [leaf for leaf, _ in self._iter_page_paths(root)]
+        self.private.numPages = len(pages)
+        return self

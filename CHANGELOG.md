@@ -69,6 +69,11 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
 - A stream whose `/DecodeParms` is `null`, or an array holding
   `null`, is decompressed with the filter's defaults instead of
   raising (upstream PR #110 by @erezarnon).
+- New `PdfReader.remove_page(index)` takes a page out of the page
+  tree, at any depth, so a copy written from the reader leaves it out.
+  /Pages nodes left empty are removed and every /Count is recomputed;
+  `pages` and `numPages` follow. It returns the reader (upstream PR #221
+  by @Lucas-C).
 
 ### Encryption
 

@@ -266,3 +266,111 @@ def test_catalog_pages_missing(pages_ref, caplog):
         reader = PdfReader(fdata=data)
     assert reader.pages == []
     assert any('catalog /Pages' in r.getMessage() for r in caplog.records)
+
+
+# -- remove_page (upstream PR #221) ----------------------------------------
+
+def nested_tree(npages=5):
+    """Pages 1..npages in a three-level tree: root -> [p1, A], A -> [B, pN],
+    B -> [p2 .. pN-1]."""
+    labels = [page_label(i) for i in range(npages)]
+    b = PdfBuilder()
+    catalog, root, mid, low, font = (b.alloc() for _ in range(5))
+    page_nums = [b.alloc() for _ in labels]
+    parents = [root] + [low] * (npages - 2) + [mid]
+    contents = [b.stream(page_content(label)) for label in labels]
+    b.obj(b'<< /Type /Catalog /Pages %d 0 R >>' % root, num=catalog)
+    b.obj(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+          num=font)
+    for num, content, parent in zip(page_nums, contents, parents):
+        b.obj(b'<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] '
+              b'/Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>'
+              % (parent, font, content), num=num)
+    b.obj(b'<< /Type /Pages /Kids [%d 0 R %d 0 R] /Count %d >>'
+          % (page_nums[0], mid, npages), num=root)
+    b.obj(b'<< /Type /Pages /Parent %d 0 R /Kids [%d 0 R %d 0 R] '
+          b'/Count %d >>' % (root, low, page_nums[-1], npages - 1), num=mid)
+    refs = b' '.join(b'%d 0 R' % n for n in page_nums[1:-1])
+    b.obj(b'<< /Type /Pages /Parent %d 0 R /Kids [' % mid + refs +
+          b'] /Count %d >>' % (npages - 2), num=low)
+    b.xref_table(b'/Root %d 0 R' % catalog)
+    return b.getvalue(), labels
+
+
+def test_remove_page_flat():
+    """What the upstream PR handled: a single flat /Kids."""
+    reader = PdfReader(fdata=make_pdf(3))
+    pages = reader.pages
+    assert reader.remove_page(1) is reader
+    assert labels_of(reader) == [LABELS[0], LABELS[2]]
+    assert reader.pages is pages
+    assert reader.numPages == 2
+    assert reader.Root.Pages.Count == '2'
+    assert_valid(copy_via_trailer(reader), texts=[LABELS[0], LABELS[2]])
+
+
+@pytest.mark.parametrize('index', [0, 1, 2, 3, 4, -1, -5])
+def test_remove_page_nested(index):
+    data, labels = nested_tree()
+    assert_valid(data, texts=labels)
+    reader = PdfReader(fdata=data)
+    expected = list(labels)
+    del expected[index]
+    reader.remove_page(index)
+    assert labels_of(reader) == expected
+    assert reader.numPages == 4
+    root = reader.Root.Pages
+    assert root.Count == '4'
+    assert_valid(copy_via_trailer(reader), texts=expected)
+
+
+def test_remove_pages_until_empty_prunes_nodes():
+    data, labels = nested_tree()
+    reader = PdfReader(fdata=data)
+    for _ in range(3):
+        reader.remove_page(1)       # Empties B, then removes it from A.
+    assert labels_of(reader) == [labels[0], labels[4]]
+    mid = reader.Root.Pages.Kids[1]
+    assert len(mid.Kids) == 1 and mid.Count == '1'
+    assert_valid(copy_via_trailer(reader), texts=[labels[0], labels[4]])
+    reader.remove_page(1)           # Empties A too.
+    assert len(reader.Root.Pages.Kids) == 1
+    assert_valid(copy_via_trailer(reader), texts=[labels[0]])
+
+
+def test_remove_page_shared_subtree(caplog):
+    """A page under a /Pages node listed twice goes from both places,
+    and both /Counts above it are fixed."""
+    def kids(b, pages, page_nums):
+        mid, left, right = b.alloc(), b.alloc(), b.alloc()
+        b.obj(b'<< /Type /Pages /Kids [%d 0 R %d 0 R] /Count 4 >>'
+              % (left, right), num=pages)
+        for node in (left, right):
+            b.obj(b'<< /Type /Pages /Parent %d 0 R /Kids [%d 0 R] '
+                  b'/Count 2 >>' % (pages, mid), num=node)
+        b.obj(b'<< /Type /Pages /Parent %d 0 R /Kids [%d 0 R %d 0 R] '
+              b'/Count 2 >>' % (left, page_nums[0], page_nums[1]), num=mid)
+    reader, _ = read(build_tree(kids), caplog)
+    reader.remove_page(0)
+    assert labels_of(reader) == [LABELS[1], LABELS[1]]
+    left, right = reader.Root.Pages.Kids
+    assert (left.Count, right.Count, reader.Root.Pages.Count) == \
+        ('1', '1', '2')
+    data = copy_via_trailer(reader)
+    assert pdfium_page_texts(data) == [LABELS[1], LABELS[1]]
+    assert pypdf_page_count(data) == 2
+
+
+@pytest.mark.parametrize('index', [3, -4])
+def test_remove_page_out_of_range(index):
+    reader = PdfReader(fdata=make_pdf(3))
+    with pytest.raises(IndexError):
+        reader.remove_page(index)
+    assert reader.numPages == 3
+
+
+def test_remove_page_tree_changed_after_reading():
+    reader = PdfReader(fdata=make_pdf(3))
+    reader.Root.Pages.Kids.reverse()
+    with pytest.raises(ValueError):
+        reader.remove_page(0)
