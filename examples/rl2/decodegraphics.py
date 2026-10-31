@@ -370,7 +370,7 @@ def findparsefuncs():
 
     dispatch = {}
     expected_args = 'self token params'.split()
-    for key, func in globals().items():
+    for key, func in list(globals().items()):
         if key.startswith('parse_'):
             spec = getfullargspec(func)
             args, varargs, keywords, defaults = (

@@ -457,3 +457,22 @@ def test_rl2_decodegraphics(work, reportlab):
     which Python 3.11 removed."""
     result = work.run('rl2/decodegraphics.py', work.pdf(2))
     assert 'Tj called parse_text_out((Page 2))' in result.stdout
+
+
+def test_rl2_decodegraphics_globals_change(monkeypatch):
+    """Upstream PR #215: findparsefuncs iterated globals() directly, so a
+    global added meanwhile (the __warningregistry__ that a deprecation
+    warning from inspect.getargspec created) raised RuntimeError and the
+    module failed to import.  The module itself needs no reportlab."""
+    monkeypatch.syspath_prepend(os.path.join(EXAMPLES, 'rl2'))
+    import decodegraphics
+    real = decodegraphics.getfullargspec
+
+    def adds_a_global(func):
+        monkeypatch.setattr(decodegraphics, '_added_global', func,
+                            raising=False)
+        return real(func)
+
+    monkeypatch.setattr(decodegraphics, 'getfullargspec', adds_a_global)
+    dispatch = decodegraphics.findparsefuncs()
+    assert dispatch['Tj'][0] is decodegraphics.parse_text_out

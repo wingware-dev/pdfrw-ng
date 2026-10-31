@@ -210,6 +210,9 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   `rotate.py`, `subset.py` and `subset_booklets.py` moved into a new
   helper module, `examples/pagetools.py`. The scripts' command lines and
   output are unchanged.
+- `examples/rl2/decodegraphics.py` no longer fails with "dictionary
+  changed size during iteration" when a module global is added while it
+  builds its operator dispatch table (upstream PR #215 by @Lucas-C).
 
 ### Packaging
 
