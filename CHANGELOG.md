@@ -74,6 +74,10 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   /Pages nodes left empty are removed and every /Count is recomputed;
   `pages` and `numPages` follow. It returns the reader (upstream PR #221
   by @Lucas-C).
+  Bookmarks, named destinations, links and an `/OpenAction` that go to
+  the removed page are dropped too, so a written copy does not carry the
+  page as an orphan object; a bookmark with children keeps them and
+  loses only its destination.
 
 ### Encryption
 

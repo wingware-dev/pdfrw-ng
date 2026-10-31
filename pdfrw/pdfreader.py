@@ -20,6 +20,7 @@ from .errors import PdfParseError, log
 from .tokens import PdfTokens
 from .objects import PdfDict, PdfArray, PdfName, PdfObject, PdfIndirect
 from .uncompress import uncompress
+from .pagerefs import drop_page_refs
 from . import crypt
 from .py23_diffs import convert_load, convert_store, iteritems
 
@@ -1163,6 +1164,23 @@ class PdfReader(PdfDict):
             /Pages node listed more than once in the tree, the page goes
             from each place it was listed.
 
+            Once the page has left the tree, what still goes to it is
+            dropped too, so a written copy does not carry it along:
+            named destinations to it (in the /Names /Dests name tree or
+            the PDF 1.1 /Dests dictionary); bookmarks to it, by explicit
+            or named destination or /GoTo action (a bookmark with
+            children keeps them and loses only its destination); link
+            annotations to it on the other pages, and /GoTo actions to it
+            on other annotations; and an /OpenAction to it.  See
+            pdfrw.pagerefs.
+
+            Not cleaned, so these still bring the page (but not the rest
+            of its old tree) into a written copy: structure tree
+            elements of a tagged PDF whose /Pg is the page, form fields
+            whose widgets were on the page, article thread beads on it,
+            and /GoTo actions reached only through another action's
+            /Next or an /AA entry.  /PageLabels are not renumbered.
+
             Raises IndexError if there is no such page.
         '''
         pages = self.pages
@@ -1195,4 +1213,9 @@ class PdfReader(PdfDict):
 
         pages[:] = [leaf for leaf, _ in self._iter_page_paths(root)]
         self.private.numPages = len(pages)
+
+        # Unless the page is still listed elsewhere in the tree, drop
+        # what would carry it into a written copy as an orphan.
+        if not any(leaf is page for leaf in pages):
+            drop_page_refs(self.Root, page, pages)
         return self
