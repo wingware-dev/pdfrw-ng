@@ -48,5 +48,28 @@ class PdfOutputError(PdfError):
     "Error thrown by PDF writer"
 
 
+class PdfOutputEncodingError(PdfOutputError, UnicodeEncodeError):
+    """The writer met a str with a character it cannot write: pdfrw
+    writes str data, streams included, as latin-1 (#160).
+
+    The message names the object.  It is also a UnicodeEncodeError, with
+    the `encoding`, `object`, `start`, `end` and `reason` of the original
+    error, so code that caught that before still catches it.
+    """
+
+    def __init__(self, msg, error):
+        UnicodeEncodeError.__init__(self, error.encoding, error.object,
+                                    error.start, error.end, error.reason)
+        self.msg = msg
+
+    def __str__(self):
+        return self.msg
+
+    def __reduce__(self):
+        error = UnicodeEncodeError(self.encoding, self.object, self.start,
+                                   self.end, self.reason)
+        return type(self), (self.msg, error)
+
+
 class PdfNotImplementedError(PdfError):
     "Error thrown on missing features"

@@ -22,7 +22,7 @@ from .objects import (PdfName, PdfArray, PdfDict, IndirectPdfDict,
                       PdfObject, PdfString)
 from .compress import compress as do_compress
 from .crypt import Encryption
-from .errors import PdfOutputError, log
+from .errors import PdfOutputError, PdfOutputEncodingError, log
 from .py23_diffs import iteritems, convert_store
 
 NullObject = PdfObject('null')
@@ -53,6 +53,34 @@ def user_fmt(obj, isinstance=isinstance, float=float, str=str,
             return ('%.9f' % obj).rstrip('0').rstrip('.')
 
     return str(obj)
+
+
+def _encoding_error(error, num, obj):
+    ''' A PdfOutputEncodingError for the UnicodeEncodeError `error`, met
+        while formatting or writing indirect object `num` (`obj`), or the
+        trailer when `num` is None (#160).
+    '''
+    where = 'the trailer' if num is None else 'object %d' % num
+    part = 'a name or value in it'
+    stream = obj.stream if isinstance(obj, PdfDict) else None
+    if isinstance(stream, str):
+        try:
+            stream.encode('latin-1')
+        except UnicodeEncodeError as stream_error:
+            part = 'its stream'
+            error = stream_error
+    char = error.object[error.start:error.start + 1]
+    if part == 'its stream':
+        hint = ("A stream holds bytes as a str: decode bytes with "
+                "data.decode('latin-1'), and encode text to bytes first.")
+    else:
+        hint = ('Use PdfString.encode() for text in a PDF string; names '
+                'and other values must be latin-1.')
+    msg = ('Cannot write %s: %s contains %r (U+%04X) at index %d, which '
+           'is not latin-1, the only characters pdfrw can write from a '
+           'str. %s' % (where, part, char, ord(char) if char else 0,
+                        error.start, hint))
+    return PdfOutputEncodingError(msg, error)
 
 
 def FormatObjects(f, trailer, version='1.3', compress=True, killobj=(),
@@ -205,7 +233,12 @@ def FormatObjects(f, trailer, version='1.3', compress=True, killobj=(),
             index, obj = deferred.pop()
             if encryption is not None and obj is not encrypt_dict:
                 set_crypt_num(index + 1)
-            objlist[index] = format_obj(obj)
+            sources[index] = obj
+            try:
+                # Compressing or encrypting a stream encodes it here.
+                objlist[index] = format_obj(obj)
+            except UnicodeEncodeError as error:
+                raise _encoding_error(error, index + 1, obj) from error
             set_crypt_num(None)
 
     indirect_dict = {}
@@ -219,6 +252,8 @@ def FormatObjects(f, trailer, version='1.3', compress=True, killobj=(),
     lf_join = '\n  '.join
 
     deferred = []
+    # Each indirect object by index, to name it in an encoding error.
+    sources = {}
 
     # The number of the indirect object being formatted, when its strings
     # and stream are to be encrypted.
@@ -269,12 +304,19 @@ def FormatObjects(f, trailer, version='1.3', compress=True, killobj=(),
         objstr = '%s 0 obj\n%s\nendobj\n' % (i + 1, x)
         offsets_append((offset, 0, 'n'))
         offset += len(objstr)
-        f_write(objstr)
+        try:
+            f_write(objstr)
+        except UnicodeEncodeError as error:
+            raise _encoding_error(error, i + 1, sources.get(i)) from error
 
     f_write('xref\n0 %s\n' % len(offsets))
     for x in offsets:
         f_write('%010d %05d %s\r\n' % x)
-    f_write('trailer\n\n%s\nstartxref\n%s\n%%%%EOF\n' % (trailer, offset))
+    try:
+        f_write('trailer\n\n%s\nstartxref\n%s\n%%%%EOF\n'
+                % (trailer, offset))
+    except UnicodeEncodeError as error:
+        raise _encoding_error(error, None, None) from error
 
 
 def _later_version(version, minimum):

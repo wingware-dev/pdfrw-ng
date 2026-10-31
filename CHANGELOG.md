@@ -148,6 +148,14 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   `PdfDict.popitem` returns a `(key, value)` pair; it used to raise
   TypeError on every call. Both resolve indirect objects, and an entry
   that resolves to null counts as missing.
+- Writing a str that holds characters outside latin-1 (for example in a
+  stream) raises `PdfOutputEncodingError`, which names the object
+  number or the trailer, says whether the stream or a name or value is
+  at fault, and shows the character. It subclasses both
+  `PdfOutputError` and `UnicodeEncodeError`, so existing handlers still
+  catch it, and it is raised when compressing or encrypting too (#160).
+  `PdfOutputError` and `PdfOutputEncodingError` are now exported from
+  `pdfrw`.
 
 ### PageMerge, findobjs and logging
 

@@ -9,12 +9,15 @@ it back with pdfrw.
 """
 
 import io
+import pickle
+import re
 
 import pytest
 
 from pdfrw import PdfReader, PdfWriter, PdfDict, PdfArray, PdfName, \
-    PdfString, IndirectPdfDict
-from pdfrw.errors import PdfParseError
+    PdfString, IndirectPdfDict, PdfObject, Encryption, \
+    PdfOutputEncodingError
+from pdfrw.errors import PdfParseError, PdfOutputError
 
 from .pdfgen import make_pdf, page_label
 from .validate import assert_valid, require
@@ -85,6 +88,82 @@ def test_failed_write_leaves_file_object_untouched():
     with pytest.raises(UnicodeEncodeError):
         PdfWriter(trailer=src).write(out)
     assert out.getvalue() == b''
+
+
+# -- #160: a non-latin-1 str names the object it is in ----------------------
+
+def contents_number(src):
+    """The object number the writer gives page 1's content stream."""
+    src.pages[0].Contents.stream = 'BT (PDFRW-MARKER) Tj ET'
+    data = write_bytes(trailer=src).decode('latin-1')
+    match = re.search(r'(\d+) 0 obj\n(?:(?!endobj).)*PDFRW-MARKER', data,
+                      re.DOTALL)
+    return int(match.group(1))
+
+
+def raises_encoding_error(writer, src):
+    with pytest.raises(PdfOutputEncodingError) as info:
+        writer.write(io.BytesIO(), trailer=src)
+    exc = info.value
+    # Old handlers for either exception type still catch it.
+    assert isinstance(exc, UnicodeEncodeError)
+    assert isinstance(exc, PdfOutputError)
+    assert exc.encoding == 'latin-1'
+    assert exc.object[exc.start:exc.end] == '☃'
+    assert isinstance(exc.__cause__, UnicodeEncodeError)
+    message = str(exc)
+    assert "'☃' (U+2603)" in message
+    assert 'latin-1' in message
+    return message
+
+
+@pytest.mark.parametrize('compress', [False, True])
+def test_non_latin1_stream_names_object(compress):
+    src = reader()
+    num = contents_number(src)
+    bad_stream(src)
+    message = raises_encoding_error(PdfWriter(compress=compress), src)
+    assert message.startswith('Cannot write object %d: its stream ' % num)
+    assert "decode('latin-1')" in message
+
+
+@pytest.mark.parametrize('method', ['rc4-128', 'aes-128', 'aes-256'])
+def test_non_latin1_stream_names_object_when_encrypting(method):
+    if method != 'rc4-128':
+        require('Crypto')
+    src = reader()
+    bad_stream(src)
+    writer = PdfWriter(encrypt=Encryption('user', 'owner', method=method))
+    message = raises_encoding_error(writer, src)
+    assert re.match(r'Cannot write object \d+: its stream ', message)
+
+
+def test_non_latin1_name_names_object():
+    src = reader()
+    src.pages[0][PdfName('Snow☃')] = PdfObject('1')
+    message = raises_encoding_error(PdfWriter(), src)
+    assert re.match(r'Cannot write object \d+: a name or value in it ',
+                    message)
+
+
+def test_non_latin1_in_trailer():
+    src = reader()
+    src.Snow = PdfObject('☃')
+    message = raises_encoding_error(PdfWriter(), src)
+    assert message.startswith('Cannot write the trailer: ')
+
+
+def test_encoding_error_pickles():
+    src = reader()
+    bad_stream(src)
+    with pytest.raises(PdfOutputEncodingError) as info:
+        PdfWriter().write(io.BytesIO(), trailer=src)
+    other = pickle.loads(pickle.dumps(info.value))
+    assert type(other) is PdfOutputEncodingError
+    assert str(other) == str(info.value)
+    assert (other.encoding, other.object, other.start, other.end) == \
+        (info.value.encoding, info.value.object, info.value.start,
+         info.value.end)
 
 
 def test_bad_key_fails_before_write(tmp_path):
