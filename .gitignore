@@ -6,9 +6,11 @@
 .mcp.metadata.json
 **/.agents/plugins/wing
 **/.cursor/plugins/wing
+AGENTS.md
 
-# Wing IDE per-user project state
+# Wing IDE per-user project state, and local notes
 *.wpu
+run-notes.txt
 
 # Python
 __pycache__/

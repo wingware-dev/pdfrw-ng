@@ -19,6 +19,94 @@ __ https://github.com/pmaupin/pdfrw
 
 .. sectnum::
 
+How it was built
+================
+
+pdfrw-ng is a test of the autonomous development features in Wing Pro
+12.1, a Python IDE from `Wingware <https://wingware.com/>`__.  AI
+agents (Claude Code) did all of the work from one prompt, with Wing's
+Tasks Manager queueing and running it.  The Tasks Manager is itself an
+AI agent: it turns a request into a queue of tasks, gives each to a
+separate coding agent, answers their questions or passes them to the
+user, checks and commits their work, and starts the next.  Here it
+split the prompt into steps and ran up to five at a time.  The agents
+made their own judgement calls, filed the problems they found as new
+tasks, and took the before-and-after screenshots in ``docs/shots/``
+with the test harness they built.
+
+The run took an hour and 40 minutes on October 31, 2026, from 1:17 pm
+to 2:57 pm, and made 21 commits.  A second prompt, from 3:19 pm to
+3:52 pm, then ported the worthwhile open pull requests from upstream
+in 17 more commits, each crediting the pull request's author (see the
+CHANGELOG).  In all, 47 tasks ran.  Every task's prompt, question,
+judgement call and commit is in the `run trail <run-trail/RUN.md>`__,
+along with how the agents used Wing's MCP tools.
+
+This was the prompt that started it:
+
+    I'd like to revive pdfrw, a pure-Python library for reading, writing
+    and combining PDF files. Its last commit was in 2018 and its last
+    release in 2017, but it still gets about 3 million downloads a
+    month. This working copy is a clone of https://github.com/pmaupin/pdfrw
+    with its full history. I want a maintained fork that works on current
+    Python on macOS, Linux and Windows.
+
+    First find out where it stands: which Python versions it runs on,
+    what its tests cover (measure it), and which of the open GitHub
+    issues are real bugs you can reproduce. Then bring it up to date with
+    modern packaging, the Python versions currently supported, and a test
+    suite that runs anywhere with good coverage. Fix the bugs you can
+    reproduce, each with a regression test, starting with any that
+    silently lose pages or write broken files. Check its output with
+    independent tools, not just by reading it back with pdfrw. Keep the
+    public API compatible, so that existing users only have to change the
+    package name they install. Note the upstream issue number in each fix
+    and in a changelog.
+
+    Tests must create their own PDFs and run offline. Don't download or
+    commit PDFs from issue reports, the web, or the old static_pdfs
+    collection. Keep the original license file as it is, and credit
+    Patrick Maupin and the other original authors in the README and the
+    package metadata. The fork needs a new name on PyPI: suggest a few
+    that are free, but don't publish anything, push, or post on the
+    upstream project.
+
+    Once the tests run, set up one of the example scripts in Wing as the
+    main entry point so I can test/debug it. Run all tasks to completion
+    except small details and ideas for future improvements.
+
+    Commit a screenshot of each major visible change under docs/shots/
+    since we'll be creating a publishable trace of this run later.
+
+The working copy turned out to hold only Wing's project files, not a
+clone.  The Tasks Manager asked, and the run imported upstream's code
+at its last commit (6c89216) without its history.  Before publishing,
+upstream's full history was put back underneath, so the first commit of
+the run follows upstream's last one here, and the original authors'
+commits are kept as they were.
+
+To try it in Wing, open ``pdfrw.wpr``: ``examples/booklet.py`` is set
+as the main entry point, and ``examples/make_sample.py`` makes a PDF to
+run it on.
+
+Future work
+-----------
+
+These tasks were left for later:
+
+* Run the suite on Windows and CPython 3.15, and run the GitHub
+  Actions matrix for the first time.  The CI configuration covers the
+  versions and platforms listed below, but it has not run yet.
+* Drop the Python 2 compatibility layer, keeping ``pdfrw.py23_diffs``
+  importable.
+* Add named permission flags for ``Encryption``.
+* Optionally write AES-256 output as PDF 1.7 with the ADBE extension,
+  for older viewers.
+* Add pages into a document given as the writer's trailer, the use
+  case behind upstream PR #216.
+* Add outline (bookmark) read and write helpers, and an example that
+  inserts or deletes pages and keeps the bookmarks.
+
 Installation
 ============
 
@@ -48,9 +136,9 @@ only in the examples and modules that work with reportlab.
 Supported Python versions
 -------------------------
 
-pdfrw-ng requires Python 3.11 or later.  It is tested on CPython 3.11,
-3.12, 3.13, 3.14 and 3.15 and on PyPy 3.11, on Linux, macOS and
-Windows.  Python 2 and older Python 3 versions are no longer
+pdfrw-ng requires Python 3.11 or later.  Its CI tests CPython 3.11,
+3.12, 3.13, 3.14 and 3.15 and PyPy 3.11 on Linux, macOS and Windows
+(see `Future work`_).  Python 2 and older Python 3 versions are no longer
 supported; use upstream pdfrw 0.4 for those.
 
 What changed from pdfrw 0.4
