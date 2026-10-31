@@ -290,5 +290,32 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   @haimingZZ).
 - The README's "Reading PDFs" example shows decoding an Info string with
   `PdfString.decode()` (upstream PR #163 by @jamy015).
+- The README's "Other libraries" section lists fpdf2, WeasyPrint and
+  pikepdf (upstream PR #214 by @Lucas-C).
 - Listed every author named in LICENSE.txt in the `pyproject.toml`
   `authors`.
+
+### Upstream pull requests
+
+Open pull requests on pmaupin/pdfrw, as of this release. Each one
+taken is credited in its bullet above and in its commit.
+
+- Applied as submitted: #215 (@Lucas-C), #167 (@jwilk).
+- Reimplemented: #256 (@koteshyelamati), #110 (@erezarnon), #248
+  (@mjbright), #260 (@haimingZZ, a subset of #167), #163 (@jamy015),
+  #221 (@Lucas-C), #216 (@Lucas-C, `at_index` only), #205 (@Lucas-C),
+  #214 (@Lucas-C, without its out-of-date PyFPDF lines), and #169
+  (@mjbryant, the token cache fix; its other parts were already
+  covered).
+- Already covered by fixes in this release: #149 and #180 (/XRefStm and
+  incremental-update cross-references), #136 (NUL padding after
+  `%%EOF`), #220 and #182 (booleans written as `true`/`false`), #231
+  (`NullHandler`; its Python 2 conversion no longer applies), #253 and
+  #254 (docstring escapes), #207 (Travis CI, replaced by GitHub
+  Actions), #235 (pypdf link and name).
+- Not taken: #85, Patrick Maupin's unfinished PdfWriter refactor. It
+  dropped annotations from pages taken from another document, and the
+  writer keeps them. #153, a personal tool that wraps pdftk, ImageMagick
+  and a scanner tool, flattens and reorders bookmarks, and writes
+  invalid `/XYZ` destinations. The part of #216 that adds pages into
+  the reader's own tree.

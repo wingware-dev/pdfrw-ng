@@ -906,9 +906,25 @@ Pure Python
     text formats (such as HTML). It has an extensible PDF parser that
     can be used for other purposes instead of text analysis."
 
+-  `fpdf2 <https://github.com/py-pdf/fpdf2>`__
+
+    fpdf2 generates PDF documents: text, images, shapes, tables and
+    links drawn page by page.  It is the maintained successor of PyFPDF.
+
+-  `WeasyPrint <https://github.com/Kozea/WeasyPrint>`__
+
+    WeasyPrint is a visual rendering engine for HTML and CSS that can
+    export to PDF.  It aims to support web standards for printing.  It
+    is based on various libraries but not on a full rendering engine
+    like WebKit or Gecko.  The CSS layout engine is written in Python,
+    designed for pagination, and meant to be easy to hack on.
+
 non-pure-Python libraries
 -------------------------
 
+-  `pikepdf <https://github.com/pikepdf/pikepdf>`__ reads and writes PDF
+   files, based on the C++ library QPDF.  pdfrw-ng's test suite uses it
+   to check the files pdfrw writes.
 -  `pyPoppler <https://launchpad.net/poppler-python/>`__ can read PDF
    files.
 -  `pycairo <http://www.cairographics.org/pycairo/>`__ can write PDF
