@@ -184,7 +184,9 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   fractions, as documented. Before, it was read as points and gave a
   box half a point wide.
 - `page_per_xobj` no longer swallows KeyboardInterrupt or SystemExit
-  raised while it checks its `margin` argument.
+  raised while it checks its `margin` argument, and no longer changes
+  a short `margin` list passed to it. Padding it to four sides used to
+  grow the caller's own list in place.
 
 ### Examples
 

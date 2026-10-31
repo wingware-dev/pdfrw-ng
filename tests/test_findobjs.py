@@ -70,3 +70,14 @@ def test_margin_does_not_swallow_keyboard_interrupt():
     with pytest.raises(KeyboardInterrupt):
         list(page_per_xobj([page_with(Im1=image())],
                            margin=Interrupting()))
+
+
+def test_short_margin_list_is_not_changed():
+    # Padding a short margin with `margin *= 2` used to grow the
+    # caller's own list in place.
+    margin = [10, 20]
+    padded, = page_per_xobj([page_with(Im1=image())], margin=margin)
+    assert margin == [10, 20]
+    sides, = page_per_xobj([page_with(Im1=image())],
+                           margin=[10, 20, 10, 20])
+    assert mediabox(padded) == mediabox(sides)
