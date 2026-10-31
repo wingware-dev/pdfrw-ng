@@ -266,7 +266,7 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   requires Python 3.11 or later and has an optional `crypto` extra
   (pycryptodome).
 - Dropped Python 2 and Python 3 versions before 3.11. Supported versions
-  are 3.11 to 3.15 and PyPy 3.11.
+  are 3.11 to 3.15; PyPy should work but is not tested in CI.
 - The test suite runs offline. Tests build their own PDFs with
   `tests/pdfgen.py` and check output with `tests/validate.py`, and
   network access is blocked during tests. Removed the tests and artifacts
@@ -281,8 +281,8 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   round trips. The flate PNG test no longer writes `.pickle` files into
   `tests/`.
 - Replaced Travis CI with GitHub Actions on Linux, macOS and Windows for
-  CPython 3.11 to 3.15 and PyPy 3.11, with coverage and warnings as
-  errors.
+  CPython 3.11 to 3.15, with coverage and warnings as errors. PyPy is not
+  tested in CI because the test validators don't install on it.
 - Rewrote README.rst for the fork. It covers installing `pdfrw-ng` from
   source (it is not on PyPI), uninstalling `pdfrw`/`pdfrw2` first,
   supported Python versions, running the offline tests, and credits for

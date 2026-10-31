@@ -137,8 +137,10 @@ Supported Python versions
 -------------------------
 
 pdfrw-ng requires Python 3.11 or later.  Its CI tests CPython 3.11,
-3.12, 3.13, 3.14 and 3.15 and PyPy 3.11 on Linux, macOS and Windows
-(see `Future work`_).  Python 2 and older Python 3 versions are no longer
+3.12, 3.13, 3.14 and 3.15 on Linux, macOS and Windows (see `Future
+work`_).  pdfrw-ng is pure Python and should run on PyPy, but CI doesn't
+test it there, because the test suite's validators don't install on
+PyPy.  Python 2 and older Python 3 versions are no longer
 supported; use upstream pdfrw 0.4 for those.
 
 What changed from pdfrw 0.4
