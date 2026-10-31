@@ -152,6 +152,8 @@ reportlab (``pip install reportlab``).
 
 * `4up.py`__ will shrink pages down and place 4 of them on
   each output page.
+* `6up.py`__ and `9up.py`__ do the same with 6 (two across, three
+  down) or 9 (three by three) pages per output page.
 * `alter.py`__ shows an example of modifying metadata, without
   altering the structure of the PDF.
 * `booklet.py`__ shows an example of creating a 2-up output
@@ -184,6 +186,8 @@ reportlab (``pip install reportlab``).
   http://www.wikihow.com/Bind-a-Book )
 
 __ examples/4up.py
+__ examples/6up.py
+__ examples/9up.py
 __ examples/alter.py
 __ examples/booklet.py
 __ examples/cat.py
