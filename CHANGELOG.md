@@ -87,6 +87,29 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
 
 ### Examples
 
+- `rl2/copy.py` is renamed `rl2/copy_pdf.py`. Its name shadowed the
+  standard library's `copy` module, so reportlab failed to import
+  (#218). `rl2/decodegraphics.py` now uses `inspect.getfullargspec`
+  (`getargspec` was removed in Python 3.11), and it decodes text
+  without the `PdfString.decode(remap, twobyte)` API, which no longer
+  exists.
+- `booklet.py` no longer crashes on a 1-page file. With `-p`, a blank
+  half sheet no longer moves the page beside it to the wrong half.
+- `subset.py` and `rotate.py` refuse page 0 and out-of-range pages;
+  page 0 used to select the last page. Descending ranges such as `5-3`
+  now work.
+- `rl1/booklet.py` no longer drops a page whose dictionary equals its
+  neighbour's (pages were compared by value, not identity).
+- `subset_booklets.py` runs on Python 3 and writes
+  `subset_booklets.<name>.pdf`, as its docstring says.
+- `extract.py` on a file without XObjects, `rl1/subset.py` with bad page
+  numbers and `rotate.py` with a bad angle now exit with a message
+  instead of a traceback. `rl1/subset.py`'s last page argument is
+  optional.
+- `alter.py` no longer crashes on a file without an `/Info` dictionary.
+- New `tests/test_examples.py` runs every example on generated PDFs and
+  checks the output with qpdf, pypdf and PDFium.
+
 ### Packaging
 
 - Replaced `setup.py`, `setup.cfg`, `MANIFEST.in` and `releasing.txt` with

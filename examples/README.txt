@@ -26,7 +26,7 @@ rl1/platypus_pdf_template.py -- Example using a PDF page as a watermark backgrou
 
 rl1/subset.py -- Same as subset.py, using reportlab for output.  Simplest reportlab example.
 
-rl2/copy.py -- example of how you could parse a graphics stream and then use reportlab for output.
+rl2/copy_pdf.py -- example of how you could parse a graphics stream and then use reportlab for output.
                Works on a few different PDFs, probably not a suitable starting point for real
                production work without a lot of work on the library functions.
 

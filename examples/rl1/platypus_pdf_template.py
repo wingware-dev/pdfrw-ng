@@ -3,7 +3,7 @@
 """
 usage: platypus_pdf_template.py source.pdf
 
-Creates platypus.source.pdf
+Creates platypus_pdf_template.source.pdf
 
 Example of using pdfrw to use page 1 of a source PDF as the background
 for other pages programmatically generated with Platypus.

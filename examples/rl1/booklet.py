@@ -24,40 +24,33 @@ def read_and_double(inpfn):
     pages = PdfReader(inpfn).pages
     pages = [pagexobj(x) for x in pages]
     if len(pages) & 1:
-        pages.append(pages[0])  # Sentinel -- get same size for back as front
+        pages.append(None)  # Blank back page
 
     xobjs = []
     while len(pages) > 2:
         xobjs.append((pages.pop(), pages.pop(0)))
         xobjs.append((pages.pop(0), pages.pop()))
-    xobjs += [(x,) for x in pages]
+    xobjs += [(x,) for x in pages if x is not None]
     return xobjs
 
 
 def make_pdf(outfn, xobjpairs):
     canvas = Canvas(outfn)
     for xobjlist in xobjpairs:
-        x = y = 0
+        # A blank half (None) is as big as the other half
+        present = [xobj for xobj in xobjlist if xobj is not None]
+        width = max(xobj.BBox[2] for xobj in present)
+        height = max(xobj.BBox[3] for xobj in present)
+        canvas.setPageSize((width * len(xobjlist), height))
+
+        x = 0
         for xobj in xobjlist:
-            x += xobj.BBox[2]
-            y = max(y, xobj.BBox[3])
-
-        canvas.setPageSize((x, y))
-
-        # Handle blank back page
-        if len(xobjlist) > 1 and xobjlist[0] == xobjlist[-1]:
-            xobjlist = xobjlist[:1]
-            x = xobjlist[0].BBox[2]
-        else:
-            x = 0
-        y = 0
-
-        for xobj in xobjlist:
-            canvas.saveState()
-            canvas.translate(x, y)
-            canvas.doForm(makerl(canvas, xobj))
-            canvas.restoreState()
-            x += xobj.BBox[2]
+            if xobj is not None:
+                canvas.saveState()
+                canvas.translate(x, 0)
+                canvas.doForm(makerl(canvas, xobj))
+                canvas.restoreState()
+            x += width
         canvas.showPage()
     canvas.save()
 

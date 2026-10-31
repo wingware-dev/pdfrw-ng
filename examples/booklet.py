@@ -11,21 +11,35 @@ to print 4 8.5x11 pages using a single 11x17 sheet (double-sided).
 The output would be using the same type of sheet
 and you can get up to 3 blank sides if -p is enabled.
 
-Otherwise the two sides in the middle will be in original page size
-and you can have 1 blank sides at most.
+Otherwise, when the page count is 2 more than a multiple of 4, the two
+sides in the middle are in original page size (one leaf, printed on
+both sides, that goes inside the folded sheets), and you get at most 1
+blank side.
 
 '''
 
 import os
 import argparse
 
-from pdfrw import PdfReader, PdfWriter, PageMerge
+from pdfrw import PdfReader, PdfWriter, PageMerge, PdfArray
 
 
-def fixpage(*pages):
-    result = PageMerge() + (x for x in pages if x is not None)
-    result[-1].x += result[0].w
+def fixpage(left, right, size):
+    """ Put two pages side by side on one sheet.  Either may be None
+        (a blank half); `size` is the (width, height) of one half.
+    """
+    result = PageMerge()
+    for x, page in ((0, left), (size[0], right)):
+        if page is not None:
+            result.add(page)
+            result[-1].x = x
+    result.mbox = PdfArray([0, 0, 2 * size[0], size[1]])
     return result.render()
+
+
+def page_size(page):
+    rect = PageMerge().add(page)[0]
+    return rect.w, rect.h
 
 
 parser = argparse.ArgumentParser()
@@ -43,14 +57,23 @@ if args.padding:
 else:
     pad_to = 2
 
+if not ipages:
+    raise SystemExit('%s has no pages' % inpfn)
+
+# Each half sheet is as big as the largest input page
+size = tuple(max(dims) for dims in zip(*(page_size(x) for x in ipages)))
+
 # Make sure we have a correct number of sides
 ipages += [None]*(-len(ipages)%pad_to)
 
 opages = []
 while len(ipages) > 2:
-    opages.append(fixpage(ipages.pop(), ipages.pop(0)))
-    opages.append(fixpage(ipages.pop(0), ipages.pop()))
+    opages.append(fixpage(ipages.pop(), ipages.pop(0), size))
+    opages.append(fixpage(ipages.pop(0), ipages.pop(), size))
 
-opages += ipages
+# Without padding, a page count of 2 mod 4 leaves the two middle sides,
+# which go on a single leaf in their original size.  A one-page input
+# leaves its page and a blank, which is left out.
+opages += [x for x in ipages if x is not None]
 
 PdfWriter(outfn).addpages(opages).write()

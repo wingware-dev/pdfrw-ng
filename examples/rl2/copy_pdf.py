@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 '''
-usage:   copy.py my.pdf
+usage:   copy_pdf.py my.pdf
 
 Creates copy.my.pdf
 

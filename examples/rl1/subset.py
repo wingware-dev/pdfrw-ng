@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 
 '''
-usage:   subset.py my.pdf firstpage lastpage
+usage:   subset.py my.pdf firstpage [lastpage]
 
-Creates subset_<pagenum>_to_<pagenum>.my.pdf
+Creates subset.my.pdf with pages firstpage to lastpage (default: just
+firstpage).  Pages are numbered from 1.
 
 
 Uses Form XObjects and reportlab to create output file.
@@ -27,6 +28,9 @@ def go(inpfn, firstpage, lastpage):
     outfn = 'subset.' + os.path.basename(inpfn)
 
     pages = PdfReader(inpfn).pages
+    if not 1 <= firstpage <= lastpage <= len(pages):
+        raise SystemExit('Bad page range %d-%d: pages are numbered 1 to %d'
+                         % (firstpage, lastpage, len(pages)))
     pages = [pagexobj(x) for x in pages[firstpage - 1:lastpage]]
     canvas = Canvas(outfn)
 
@@ -38,5 +42,9 @@ def go(inpfn, firstpage, lastpage):
     canvas.save()
 
 if __name__ == '__main__':
-    inpfn, firstpage, lastpage = sys.argv[1:]
+    args = sys.argv[1:]
+    if len(args) not in (2, 3):
+        raise SystemExit(__doc__)
+    inpfn, firstpage = args[:2]
+    lastpage = args[2] if len(args) == 3 else firstpage
     go(inpfn, firstpage, lastpage)

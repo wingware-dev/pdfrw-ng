@@ -230,7 +230,7 @@ the pages will line up properly and be pre-collated.
 Graphics stream parsing proof of concept
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The `copy.py`__ script shows a simple example of reading in a PDF, and
+The `copy_pdf.py`__ script shows a simple example of reading in a PDF, and
 using the decodegraphics.py module to try to write the same information
 out to a new PDF through a reportlab canvas. (If you know about reportlab,
 you know that if you can faithfully render a PDF to a reportlab canvas, you
@@ -240,7 +240,7 @@ decodegraphics is really more than a proof of concept than anything
 else. For most cases, just use the Form XObject capability, as shown in
 the examples/rl1/booklet.py demo.
 
-__ examples/rl2/copy.py
+__ examples/rl2/copy_pdf.py
 
 pdfrw philosophy
 ==================

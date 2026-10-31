@@ -11,7 +11,7 @@ Needs work on fonts and unicode, but works on a few PDFs.
 Better to use Form XObjects for most things (see the example in rl1).
 
 '''
-from inspect import getargspec
+from inspect import getfullargspec
 
 from pdfrw import PdfTokens
 from pdfrw.objects import PdfString
@@ -229,12 +229,12 @@ def parse_setfont(self, token='Tf', params='nf'):
 
 
 def parse_text_out(self, token='Tj', params='t'):
-    text = params[0].decode(self.curfont.remap, self.curfont.twobyte)
+    text = decode_text(params[0], self.curfont)
     self.tpath.textOut(text)
 
 def parse_lf_text_out(self, token="'", params='t'):
     self.tpath.textLine()
-    text = params[0].decode(self.curfont.remap, self.curfont.twobyte)
+    text = decode_text(params[0], self.curfont)
     self.tpath.textOut(text)
 
 
@@ -242,17 +242,15 @@ def parse_lf_text_out_with_spacing(self, token='"', params='fft'):
     self.tpath.setWordSpace(params[0])
     self.tpath.setCharSpace(params[1])
     self.tpath.textLine()
-    text = params[2].decode(self.curfont.remap, self.curfont.twobyte)
+    text = decode_text(params[2], self.curfont)
     self.tpath.textOut(text)
 
 
 def parse_TJ(self, token='TJ', params='a'):
-    remap = self.curfont.remap
-    twobyte = self.curfont.twobyte
     result = []
     for x in params[0]:
         if isinstance(x, PdfString):
-            result.append(x.decode(remap, twobyte))
+            result.append(decode_text(x, self.curfont))
         else:
             # TODO: Adjust spacing between characters here
             int(x)
@@ -327,6 +325,19 @@ class FontInfo(object):
                           zip(info2[::2], info2[1::2])).get
         self.twobyte = len(info[0]) > 4
 
+
+def decode_text(pdfstring, font):
+    ''' Decode the character codes in a text-showing operand with the
+        font's mapping.  Codes the font does not map become '?'.
+    '''
+    raw = pdfstring.to_bytes()
+    if font.twobyte:
+        codes = [(raw[i] << 8) | raw[i + 1]
+                 for i in range(0, len(raw) - 1, 2)]
+    else:
+        codes = list(raw)
+    return ''.join(font.remap(code) or '?' for code in codes)
+
 #############################################################################
 # Control structures
 
@@ -361,7 +372,9 @@ def findparsefuncs():
     expected_args = 'self token params'.split()
     for key, func in globals().items():
         if key.startswith('parse_'):
-            args, varargs, keywords, defaults = getargspec(func)
+            spec = getfullargspec(func)
+            args, varargs, keywords, defaults = (
+                spec.args, spec.varargs, spec.varkw, spec.defaults)
             assert (args == expected_args and varargs is None and
                     keywords is None and len(defaults) == 2), (
                     key, args, varargs, keywords, defaults)
@@ -411,16 +424,7 @@ class _ParseClass(object):
                 else:
                     print ("Unparsed parameters/commands: %s" % params[:delta])
                 del params[:delta]
-            paraminfo = zip(paraminfo, params)
-            try:
-                params[:] = [x(y) for (x, y) in paraminfo]
-            except:
-                for i, (x, y) in enumerate(paraminfo):
-                    try:
-                        x(y)
-                    except:
-                        raise  # For now
-                    continue
+            params[:] = [x(y) for (x, y) in zip(paraminfo, params)]
             func(self, token, params)
             params[:] = []
 

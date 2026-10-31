@@ -12,11 +12,13 @@ Demonstrates making a slight alteration to a preexisting PDF file.
 import sys
 import os
 
-from pdfrw import PdfReader, PdfWriter
+from pdfrw import PdfReader, PdfWriter, IndirectPdfDict
 
 inpfn, = sys.argv[1:]
 outfn = 'alter.' + os.path.basename(inpfn)
 
 trailer = PdfReader(inpfn)
+if trailer.Info is None:
+    trailer.Info = IndirectPdfDict()
 trailer.Info.Title = 'My New Title Goes Here'
 PdfWriter(outfn, trailer=trailer).write()
