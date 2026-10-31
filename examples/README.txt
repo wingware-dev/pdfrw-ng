@@ -2,6 +2,9 @@ Example programs:
 
 4up.py -- Prints pages four-up
 
+6up.py, 9up.py -- Print pages six-up (two across, three down) or
+nine-up (three across, three down)
+
 alter.py -- Simple example of making a very slight modification to a PDF.
 
 booklet.py -- Converts a PDF into a booklet.

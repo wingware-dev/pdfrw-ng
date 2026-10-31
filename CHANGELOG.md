@@ -219,6 +219,10 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
 - `examples/rl2/decodegraphics.py` no longer fails with "dictionary
   changed size during iteration" when a module global is added while it
   builds its operator dispatch table (upstream PR #215 by @Lucas-C).
+- New `6up.py` and `9up.py` put six (two across, three down) or nine
+  (three by three) pages on each output page, using a new `grid()`
+  helper in `examples/pagetools.py`; a partly filled last sheet is the
+  same size as the others (upstream PR #248 by @mjbright).
 
 ### Packaging
 

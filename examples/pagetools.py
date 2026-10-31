@@ -13,6 +13,7 @@ library module: see rl2/copy_pdf.py, upstream issue #218.)
     page_size(page)                 -> (width, height)
     max_page_size(pages)            -> (largest width, largest height)
     side_by_side(left, right, size) -> one two-up page
+    grid(pages, columns, rows)      -> one n-up page, e.g. 6-up or 9-up
 '''
 
 from pdfrw import PageMerge, PdfArray
@@ -64,4 +65,23 @@ def side_by_side(left, right, size):
             result.add(page)
             result[-1].x = x
     result.mbox = PdfArray([0, 0, 2 * size[0], size[1]])
+    return result.render()
+
+
+def grid(pages, columns, rows):
+    ''' Up to columns * rows pages on one sheet, in reading order (left
+        to right, then top to bottom).  Each page is shrunk by the same
+        factor, 1 / max(columns, rows), so none is distorted.  The sheet
+        is sized for a full grid even when fewer pages are given, so the
+        last sheet of a document matches the others.
+    '''
+    scale = 1.0 / max(columns, rows)
+    width, height = (scale * x for x in max_page_size(pages))
+    result = PageMerge() + pages
+    for index, page in enumerate(result):
+        page.scale(scale)
+        row, column = divmod(index, columns)
+        page.x = column * width
+        page.y = (rows - 1 - row) * height
+    result.mbox = PdfArray([0, 0, columns * width, rows * height])
     return result.render()

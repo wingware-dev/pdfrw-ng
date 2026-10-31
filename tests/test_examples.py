@@ -156,6 +156,53 @@ def test_4up(work):
     assert quadrant_texts(data) == [labels(1, 2, 3, 4), labels(5, 6, 7, 8)]
 
 
+def grid_layout(data, columns, rows):
+    """Per page, its rounded size and the text in each cell of a
+    columns x rows grid, in reading order ('' for an empty cell)."""
+    pdfium = require('pypdfium2')
+    doc = pdfium.PdfDocument(data)
+    try:
+        result = []
+        for index in range(len(doc)):
+            page = doc[index]
+            width, height = page.get_size()
+            w, h = width / columns, height / rows
+            text = page.get_textpage()
+            result.append(((round(width), round(height)), [
+                text.get_text_bounded(c * w, r * h, (c + 1) * w,
+                                      (r + 1) * h).strip()
+                for r in reversed(range(rows)) for c in range(columns)]))
+            text.close()
+            page.close()
+        return result
+    finally:
+        doc.close()
+
+
+@pytest.mark.parametrize('script, columns, rows, npages', [
+    ('6up.py', 2, 3, 8),
+    ('9up.py', 3, 3, 11),
+])
+def test_n_up(work, script, columns, rows, npages):
+    """Upstream PR #248: pages shrunk by a third, in reading order.  The
+    last, partly filled sheet is as big as the others."""
+    work.run(script, work.pdf(npages))
+    data = work.read(script[:3] + '.p%d.pdf' % npages)
+    per_sheet = columns * rows
+    assert_valid(data, pages=2)
+    size = (round(WIDTH * columns / 3), round(HEIGHT * rows / 3))
+    first = labels(*range(1, per_sheet + 1))
+    rest = labels(*range(per_sheet + 1, npages + 1))
+    assert grid_layout(data, columns, rows) == [
+        (size, first),
+        (size, rest + [''] * (per_sheet - len(rest)))]
+
+
+@pytest.mark.parametrize('script', ['6up.py', '9up.py'])
+def test_n_up_usage(work, script):
+    assert_refused(work.run(script, ok=False), 'usage:')
+
+
 def test_alter(work):
     """No /Info dictionary in the input used to crash the script."""
     work.run('alter.py', work.pdf(3))
