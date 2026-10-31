@@ -109,6 +109,9 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
 - `alter.py` no longer crashes on a file without an `/Info` dictionary.
 - New `tests/test_examples.py` runs every example on generated PDFs and
   checks the output with qpdf, pypdf and PDFium.
+- New `make_sample.py` writes `build/sample.pdf`, a numbered sample to
+  try the other examples on, using the test suite's PDF builder (needs a
+  source checkout).
 
 ### Packaging
 

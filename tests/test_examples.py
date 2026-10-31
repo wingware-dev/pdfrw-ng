@@ -315,6 +315,26 @@ def test_subset_booklets(work, npages, expected):
     assert page_layout(data) == expected
 
 
+def test_make_sample(work):
+    result = work.run('make_sample.py', '5', 'sample.pdf')
+    assert 'Wrote sample.pdf (5 pages)' in result.stdout
+    data = work.read('sample.pdf')
+    assert_valid(data, texts=labels(1, 2, 3, 4, 5))
+    # The booklet example accepts it, as the Wing main entry point runs it
+    work.run('booklet.py', 'sample.pdf')
+    assert page_layout(work.read('booklet.sample.pdf')) == [
+        sheet(None, 1), sheet(2, 5), single(3), single(4)]
+
+
+@pytest.mark.parametrize('args, message', [
+    (['0'], 'npages must be at least 1'),
+    (['x'], "npages must be a number: 'x'"),
+    (['1', 'a', 'b'], 'usage:'),
+])
+def test_make_sample_refuses(work, args, message):
+    assert_refused(work.run('make_sample.py', *args, ok=False), message)
+
+
 def test_unspread(work):
     work.run('booklet.py', work.pdf(4))
     work.run('unspread.py', 'booklet.p4.pdf')
