@@ -250,5 +250,9 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   filter, the standard security handler is read with RC4, AES-128 and
   AES-256, and damaged and incrementally updated files are read. A
   "Before and after" section links the screenshots in docs/shots/.
+- Fixed typos in README.rst (upstream PR #167 by @jwilk and PR #260 by
+  @haimingZZ).
+- The README's "Reading PDFs" example shows decoding an Info string with
+  `PdfString.decode()` (upstream PR #163 by @jamy015).
 - Listed every author named in LICENSE.txt in the `pyproject.toml`
   `authors`.
