@@ -12,3 +12,4 @@ proj.directory-list = [{'dirloc': loc('.'),
                         'watch_for_changes': True}]
 proj.file-type = 'shared'
 testing.auto-discover = True
+testing.test-framework = {None: ':internal pytest'}

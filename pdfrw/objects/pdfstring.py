@@ -3,7 +3,7 @@
 #                    2016 James Laird-Wah, Sydney, Australia
 # MIT license -- See LICENSE.txt for details
 
-"""
+r"""
 
 ================================
 PdfString encoding and decoding
@@ -364,7 +364,7 @@ class PdfString(str):
         return unescape_func
 
     def decode_literal(self):
-        """ Decode a PDF literal string, which is enclosed in parentheses ()
+        r""" Decode a PDF literal string, which is enclosed in parentheses ()
 
             Many pdfrw users never decode strings, so defer creating
             data structures to do so until the first string is decoded.
@@ -373,7 +373,7 @@ class PdfString(str):
             (PDF 1.7 Reference, section 3.2.3, page 53)
 
                 1. \[nrtbf\()]: simple escapes
-                2. \\d{1,3}: octal. Must be zero-padded to 3 digits
+                2. \d{1,3}: octal. Must be zero-padded to 3 digits
                     if followed by digit
                 3. \<end of line>: line continuation. We don't know the EOL
                     marker used in the PDF, so accept \r, \n, and \r\n.

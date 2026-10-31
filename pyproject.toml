@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pdfrw-ng"
+dynamic = ["version"]
+description = "Pure-Python PDF file reader/writer library (maintained fork of pdfrw)"
+readme = "README.rst"
+license = "MIT"
+license-files = ["LICENSE.txt"]
+requires-python = ">=3.11"
+authors = [
+    { name = "Patrick Maupin", email = "pmaupin@gmail.com" },
+]
+keywords = ["pdf", "vector graphics", "nup", "watermark", "split", "join", "merge"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+    "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Text Processing",
+    "Topic :: Printing",
+    "Topic :: Utilities",
+]
+dependencies = []
+
+[project.optional-dependencies]
+crypto = ["pycryptodome"]
+
+[project.urls]
+Upstream = "https://github.com/pmaupin/pdfrw"
+
+[dependency-groups]
+test = [
+    "pytest",
+    "pytest-cov",
+    "pikepdf",
+    "pypdf",
+    "pypdfium2",
+    "reportlab",
+]
+
+[tool.hatch.version]
+path = "pdfrw/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pdfrw"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/pdfrw",
+    "/tests",
+    "/examples",
+    "/README.rst",
+    "/CHANGELOG.md",
+    "/LICENSE.txt",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra"]
+# Warnings are errors, so a SyntaxWarning or DeprecationWarning from pdfrw
+# fails the suite (upstream #170).
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = ["pdfrw"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

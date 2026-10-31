@@ -63,18 +63,19 @@ tests/saved_results
 tests/tmp_results
 wiki/
 
-# Distribution / packaging
+# Distribution / packaging (anchored to the repo root, so a package or
+# test directory named lib/, bin/, etc. is not ignored by accident)
 .Python
-env/
-bin/
-develop-eggs/
-eggs/
-lib/
-lib64/
-lib64
-parts/
-sdist/
-var/
+/env/
+/bin/
+/develop-eggs/
+/eggs/
+/lib/
+/lib64/
+/lib64
+/parts/
+/sdist/
+/var/
 .installed.cfg
 *.egg
 pyvenv.cfg

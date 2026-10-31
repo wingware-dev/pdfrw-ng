@@ -18,17 +18,38 @@ import unittest
 import base64
 import array
 import logging
-import ast
-import os
+import random
 
-#
-# Sample PNGs with filtered scanlines retrieved from
-# http://www.schaik.com/pngsuite/pngsuite_fil_png.html
-#
 
-def filepath(filename):
-    pwd = os.path.dirname(__file__)
-    return os.path.join(pwd, filename)
+def _paeth(a, b, c):
+    p = a + b - c
+    pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+    if pa <= pb and pa <= pc:
+        return a
+    if pb <= pc:
+        return b
+    return c
+
+
+def png_encode_rows(rows, bpp, row_filters):
+    """Apply PNG filters (PNG spec section 9) to raw 8-bit rows.
+
+    Written from the spec independently of pdfrw's decoder, so a round
+    trip through both checks the decoder.  Returns the filtered bytes,
+    each row led by its filter-type byte.
+    """
+    out = bytearray()
+    prior = bytes(len(rows[0]))
+    for row, ftype in zip(rows, row_filters):
+        out.append(ftype)
+        for i, x in enumerate(row):
+            a = row[i - bpp] if i >= bpp else 0
+            b = prior[i]
+            c = prior[i - bpp] if i >= bpp else 0
+            predictor = (0, a, b, (a + b) // 2, _paeth(a, b, c))[ftype]
+            out.append((x - predictor) % 256)
+        prior = row
+    return bytes(out)
 
 def create_data(nc=1, nr=1, bpc=8, ncolors=1, filter_type=0):
     pixel_size = (bpc * ncolors + 7) // 8
@@ -279,117 +300,36 @@ class TestFlatePNG(unittest.TestCase):
         expected = prev_rowa
         assert expected == result, "\ne: %r\nr: %r" % (expected, result)
 
-    def util_test_flate_png_alt_from_png_log_file(self, filename):
-
-        with open(filepath(filename)) as f:
-            data = array.array('B')
-            expected = array.array('B')
-            width = 0
-            bit_depth = 0
-            channels = 0
-            color_type = 0
-            pixel_depth = 0
-            rowbytes = 0
-            filter = 0
-            nrows = 0
-
-            for l in f.readlines():
-
-                if l.startswith("PASS:"):
-                    break
-
-                l = l.split(' = ')
-                var = l[0]
-                val = l[1]
-
-                if var == 'width':
-                    width = int(val)
-
-                elif var == 'bit_depth':
-                    bit_depth = int(val)
-
-                elif var == 'channels':
-                    channels = int(val)
-
-                elif var == 'color_type':
-                   color_type = int(val)
-
-                elif var == 'pixel_depth':
-                    pixel_depth = int(val)
-
-                elif var == 'rowbytes':
-                    rowbytes = int(val)
-
-                elif var == 'filter':
-                    filter = int(val)
-
-                elif var == 'data':
-                    d = ast.literal_eval(val)
-                    data.append(filter)
-                    data.extend(d)
-
-                elif var == 'expected':
-                    e = ast.literal_eval(val)
-                    expected.extend(e)
-                    nrows += 1
-
-            bytes_per_pixel = pixel_depth // 8
-
-            logging.error("width: %d" % width)
-            logging.error("bit_depth: %d" % bit_depth)
-            logging.error("channels: %d" % channels)
-            logging.error("color_type: %d" % color_type)
-            logging.error("pixel_depth: %d" % pixel_depth)
-            logging.error("rowbytes: %d" % rowbytes)
-            logging.error("filter: %d" % filter)
-            logging.error("bytes_per_pixel: %d" % bytes_per_pixel)
-            logging.error("expected: %r" % len(expected))
-            logging.error("data: %r" % len(data))
-
-            assert color_type in [
-                        0, # Grayscale (Y)
-                        2, # Truecolor (RGB)
-                        # 3 Indexed is not supported (Palette)
-                        4, # Grayscale with alpha (YA)
-                        6, # Truecolor with alpha (RGBA)
-                    ]
-            assert filter in [0, 1, 2, 3, 4]
-            assert channels * bit_depth == pixel_depth
-            assert (pixel_depth // 8) * width == rowbytes
-            assert 0 == pixel_depth % 8 # can't support pixels with bit_depth < 8
-            assert 8 == bit_depth # ideally, we should test bit_depth 16 also
-            assert nrows * (1 + width * bytes_per_pixel) == len(data) # 1 filter byte preceeding each row
-            assert nrows * width * bytes_per_pixel == len(expected)
-
-        result, error = flate_png_impl(data, 12, width, channels, bit_depth)
-
-        import pickle
-        with open(filepath('./result.pickle'), 'wb') as f:
-            pickle.dump(result, f)
-        with open(filepath('./expected.pickle'), 'wb') as f:
-            pickle.dump(expected, f)
-
+    def check_png_roundtrip(self, width, channels, nrows, filters, seed):
+        """Filter random pixels with an independent PNG encoder, then check
+        that pdfrw's decoder restores them exactly."""
+        rng = random.Random(seed)
+        rows = [bytes(rng.randrange(256) for _ in range(width * channels))
+                for _ in range(nrows)]
+        row_filters = [filters[i % len(filters)] for i in range(nrows)]
+        data = array.array('B', png_encode_rows(rows, channels, row_filters))
+        result, error = flate_png_impl(data, 12, width, channels, 8)
         assert error is None
-        assert expected == result
+        assert result == array.array('B', b''.join(rows)), \
+            'width=%d channels=%d filters=%r' % (width, channels, row_filters)
 
+    def test_flate_png_generated_each_filter(self):
+        # Replaces the PngSuite-derived .png.log vectors (f01-f04n2c08,
+        # basn2c08, basn0g08): grayscale and RGB, each filter type alone.
+        for channels in (1, 3, 4):
+            for filter_type in range(5):
+                with self.subTest(channels=channels, filter_type=filter_type):
+                    self.check_png_roundtrip(32, channels, 32, [filter_type],
+                                             seed=channels * 10 + filter_type)
 
-    def test_flate_png_alt_file_f01n2c08(self):
-        self.util_test_flate_png_alt_from_png_log_file("./f01n2c08.png.log")
-
-    def test_flate_png_alt_file_f02n2c08(self):
-        self.util_test_flate_png_alt_from_png_log_file("./f02n2c08.png.log")
-
-    def test_flate_png_alt_file_f03n2c08(self):
-        self.util_test_flate_png_alt_from_png_log_file("./f03n2c08.png.log")
-
-    def test_flate_png_alt_file_f04n2c08(self):
-        self.util_test_flate_png_alt_from_png_log_file("./f04n2c08.png.log")
-
-    def test_flate_png_alt_file_basn2c08(self):
-        self.util_test_flate_png_alt_from_png_log_file("./basn2c08.png.log")
-
-    def test_flate_png_alt_file_basn0g08(self):
-        self.util_test_flate_png_alt_from_png_log_file("./basn0g08.png.log")
+    def test_flate_png_generated_mixed_filters(self):
+        # Like f04n2c08 / basn*: every row may use a different filter.
+        for channels in (1, 2, 3, 4):
+            for width in (1, 2, 7, 32):
+                with self.subTest(channels=channels, width=width):
+                    self.check_png_roundtrip(width, channels, 11,
+                                             [0, 1, 2, 3, 4, 4, 3, 2, 1],
+                                             seed=channels * 100 + width)
 
 
 def main():
