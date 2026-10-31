@@ -78,6 +78,8 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   the removed page are dropped too, so a written copy does not carry the
   page as an orphan object; a bookmark with children keeps them and
   loses only its destination.
+  `/PageLabels` are renumbered so that every page left keeps its label;
+  a labelling range the page was in the middle of is split.
 
 ### Encryption
 

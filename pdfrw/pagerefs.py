@@ -24,12 +24,112 @@
         pages' /Annots, and a /GoTo action to the page is dropped from
         any other annotation;
       - an /OpenAction that goes to the page is dropped.
+
+    renumber_page_labels, also used by remove_page, rewrites
+    /PageLabels, which number pages by index, so that the pages left
+    keep their labels.
 '''
 
+from .errors import log
 from .objects import PdfArray, PdfDict, PdfName, PdfObject, PdfString
 from .objects.pdfname import BasePdfName
 
-__all__ = ['drop_page_refs']
+__all__ = ['drop_page_refs', 'renumber_page_labels']
+
+
+def _label_ranges(labels):
+    ''' The (page index, label dictionary) pairs of the /PageLabels
+        number tree `labels`, sorted by index; bad entries are skipped,
+        with a warning.
+    '''
+    ranges = {}
+    seen = set()
+    stack = [labels]
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, PdfDict) or id(node) in seen:
+            continue
+        seen.add(id(node))
+        nums = node.Nums
+        if isinstance(nums, list):
+            for index in range(0, len(nums) - 1, 2):
+                key, value = nums[index], nums[index + 1]
+                try:
+                    key = int(key)
+                except (TypeError, ValueError):
+                    key = None
+                if key is None or key < 0 or not isinstance(value, PdfDict):
+                    log.warning('Skipping bad /PageLabels entry %r: %r',
+                                nums[index], value)
+                    continue
+                ranges.setdefault(key, value)
+        if isinstance(node.Kids, list):
+            stack.extend(reversed(node.Kids))
+    return sorted(ranges.items())
+
+
+def _start_number(label):
+    try:
+        start = int(label.St)
+    except (TypeError, ValueError):
+        return 1
+    return start if start >= 1 else 1
+
+
+def renumber_page_labels(root, old_count, kept):
+    ''' Rewrite the /PageLabels of catalog `root`, which number
+        `old_count` pages, for the pages that are left: `kept` lists,
+        for each page left, in order, its old index.  Each page keeps
+        the label it had.
+
+        A range that loses pages in its middle is split, the second part
+        starting at the number its first page had; a range whose pages
+        are all gone is dropped.  The result is written as one flat
+        /Nums array in the /PageLabels dictionary.  Pages with no label
+        before the first range stay without one.
+    '''
+    labels = root.PageLabels if isinstance(root, PdfDict) else None
+    if not isinstance(labels, PdfDict):
+        return
+    ranges = _label_ranges(labels)
+
+    # Each old page's (range dictionary, number), or None if unlabelled.
+    old_specs = []
+    position = -1
+    for index in range(old_count):
+        while (position + 1 < len(ranges) and
+               ranges[position + 1][0] <= index):
+            position += 1
+        if position < 0:
+            old_specs.append(None)
+        else:
+            start, label = ranges[position]
+            old_specs.append((label, _start_number(label) + index - start))
+
+    new_specs = [old_specs[index] for index in kept]
+    new_ranges = []
+    previous = None
+    for index, spec in enumerate(new_specs):
+        if spec is not None:
+            label, number = spec
+            if (previous is None or previous[0] is not label or
+                    (label.S is not None and number != previous[1] + 1)):
+                if label.S is not None and number != _start_number(label):
+                    label = PdfDict(label)
+                    label.indirect = False
+                    label.St = PdfObject(number)
+                new_ranges.append((index, label))
+        previous = spec
+
+    if [(i, id(label)) for i, label in new_ranges] == \
+            [(i, id(label)) for i, label in ranges]:
+        return
+    nums = PdfArray()
+    for index, label in new_ranges:
+        nums.extend((PdfObject(index), label))
+    labels.Nums = nums
+    labels.Kids = None
+    labels.Limits = None
 
 
 def drop_page_refs(root, page, pages):

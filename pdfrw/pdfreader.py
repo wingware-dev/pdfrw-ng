@@ -20,7 +20,7 @@ from .errors import PdfParseError, log
 from .tokens import PdfTokens
 from .objects import PdfDict, PdfArray, PdfName, PdfObject, PdfIndirect
 from .uncompress import uncompress
-from .pagerefs import drop_page_refs
+from .pagerefs import drop_page_refs, renumber_page_labels
 from . import crypt
 from .py23_diffs import convert_load, convert_store, iteritems
 
@@ -1179,7 +1179,12 @@ class PdfReader(PdfDict):
             elements of a tagged PDF whose /Pg is the page, form fields
             whose widgets were on the page, article thread beads on it,
             and /GoTo actions reached only through another action's
-            /Next or an /AA entry.  /PageLabels are not renumbered.
+            /Next or an /AA entry.
+
+            /PageLabels are renumbered so that every page left keeps the
+            label it had: a labelling range the page was in the middle
+            of is split, so the pages after it go on with their old
+            numbers.  They are written back as one flat /Nums array.
 
             Raises IndexError if there is no such page.
         '''
@@ -1211,8 +1216,24 @@ class PdfReader(PdfDict):
         # ancestors that are not on `path`.
         self._recount_pages(root)
 
+        old_pages = list(pages)
         pages[:] = [leaf for leaf, _ in self._iter_page_paths(root)]
         self.private.numPages = len(pages)
+
+        # Keep each page's label.  Usually just page `index` went; a page
+        # in a /Pages node listed more than once went from each place,
+        # and the kept pages are matched to their old places in order.
+        if len(pages) == len(old_pages) - 1:
+            kept = [i for i in range(len(old_pages)) if i != index]
+        else:
+            kept = []
+            old_index = 0
+            for leaf in pages:
+                while old_pages[old_index] is not leaf:
+                    old_index += 1
+                kept.append(old_index)
+                old_index += 1
+        renumber_page_labels(self.Root, len(old_pages), kept)
 
         # Unless the page is still listed elsewhere in the tree, drop
         # what would carry it into a written copy as an orphan.

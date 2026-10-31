@@ -289,3 +289,116 @@ def test_name_tree_limits_and_strings_by_value():
     assert leaf.Limits == ['(a)', '(a)'] and mid.Limits == ['(a)', '(a)']
     assert list(other.Annots) == []
     assert link.Dest is None
+
+
+# -- /PageLabels: each page left keeps its label -----------------------------
+
+LABELLED = ['Cover', 'i', 'ii', 'iii', '1', '2', '3', 'App-A', 'App-B']
+
+
+def build_labelled(npages=len(LABELLED)):
+    """Pages "Page 1".. with /PageLabels as a two-leaf number tree:
+    a prefix-only range "Cover" at 0, roman from 1, decimal from 4, and
+    "App-" with capital letters from 7."""
+    b = PdfBuilder()
+    catalog, pages, font, kid1, kid2 = (b.alloc() for _ in range(5))
+    page_nums = [b.alloc() for _ in range(npages)]
+    contents = [b.stream(page_content(page_label(i)))
+                for i in range(npages)]
+    b.obj(b'<< /Type /Catalog /Pages %d 0 R /PageLabels << /Kids '
+          b'[%d 0 R %d 0 R] >> >>' % (pages, kid1, kid2), num=catalog)
+    b.obj(b'<< /Type /Pages /Kids [%s] /Count %d >>'
+          % (b' '.join(b'%d 0 R' % n for n in page_nums), npages), num=pages)
+    b.obj(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+          num=font)
+    for num, content in zip(page_nums, contents):
+        b.obj(b'<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] '
+              b'/Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>'
+              % (pages, font, content), num=num)
+    b.obj(b'<< /Limits [0 4] /Nums [0 << /P (Cover) >> 1 << /S /r >> '
+          b'4 << /S /D >>] >>', num=kid1)
+    b.obj(b'<< /Limits [7 7] /Nums [7 << /S /A /P (App-) >>] >>', num=kid2)
+    b.xref_table(b'/Root %d 0 R' % catalog)
+    return b.getvalue()
+
+
+def labels_by_pikepdf(data):
+    with open_pdf(data) as pdf:
+        return [page.label for page in pdf.pages]
+
+
+def labels_by_pdfium(data):
+    pdfium = require('pypdfium2')
+    doc = pdfium.PdfDocument(data)
+    try:
+        return [doc.get_page_label(i) for i in range(len(doc))]
+    finally:
+        doc.close()
+
+
+def assert_labels(data, expected):
+    """Check the page labels with pikepdf and PDFium, and with pypdf
+    when /PageLabels is flat: pypdf 6 mislabels pages of a number tree
+    with /Kids when a range runs past its leaf's /Limits."""
+    assert labels_by_pikepdf(data) == expected
+    assert labels_by_pdfium(data) == expected
+    with open_pdf(data) as pdf:
+        flat = '/Kids' not in pdf.Root.PageLabels
+    if flat:
+        pypdf = require('pypdf')
+        labels = pypdf.PdfReader(io.BytesIO(data)).page_labels
+        assert list(labels) == expected
+
+
+def test_labelled_input():
+    assert_labels(build_labelled(), LABELLED)
+
+
+@pytest.mark.parametrize('removed', [
+    [0], [1], [2], [3], [4], [5], [6], [7], [8],
+    [8, 7], [6, 4, 5], [3, 2, 1, 0]])
+def test_remove_page_keeps_labels(removed):
+    """Remove pages one at a time (each index is into the pages left)."""
+    reader = PdfReader(fdata=build_labelled())
+    expected = list(LABELLED)
+    texts = [page_label(i) for i in range(len(LABELLED))]
+    for index in removed:
+        reader.remove_page(index)
+        del expected[index]
+        del texts[index]
+    data = copy(reader)
+    assert_valid(data, texts=texts)
+    assert_labels(data, expected)
+
+
+def test_labels_left_alone_when_unchanged():
+    """Removing the last page changes no range: the number tree is kept
+    as it was, /Kids and all."""
+    reader = PdfReader(fdata=build_labelled())
+    labels = reader.Root.PageLabels
+    kids = labels.Kids
+    reader.remove_page(-1)
+    assert labels.Kids is kids and labels.Nums is None
+
+
+def test_split_range_starts_at_old_number():
+    reader = PdfReader(fdata=build_labelled())
+    reader.remove_page(5)               # "2"
+    nums = reader.Root.PageLabels.Nums
+    keys = [int(k) for k in nums[0::2]]
+    assert keys == [0, 1, 4, 5, 6]
+    assert int(nums[7].St) == 3 and nums[7].S == '/D'
+    assert nums[5].St is None       # The original range is unchanged.
+    assert reader.Root.PageLabels.Kids is None
+
+
+def test_unlabelled_leading_pages_stay_unlabelled():
+    """Pages before the first range (a damaged tree with no key 0) keep
+    having no label of their own."""
+    from pdfrw.pagerefs import renumber_page_labels
+    roman = PdfDict(S=PdfName.r)
+    root = PdfDict(PageLabels=PdfDict(Nums=PdfArray([2, roman])))
+    renumber_page_labels(root, 5, [1, 2, 3, 4])     # page 0 removed
+    nums = root.PageLabels.Nums
+    assert [int(k) for k in nums[0::2]] == [1]
+    assert nums[1] is roman
