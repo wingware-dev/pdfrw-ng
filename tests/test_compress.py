@@ -9,6 +9,7 @@ independently of pdfrw.
 
 import io
 import random
+import zlib
 
 import pytest
 
@@ -16,7 +17,7 @@ from pdfrw import PdfArray, PdfDict, PdfName, PdfReader, PdfWriter
 from pdfrw.compress import compress
 from pdfrw.uncompress import uncompress
 
-from .pdfgen import make_pdf, page_content, page_label
+from .pdfgen import PdfBuilder, make_pdf, page_content, page_label
 from .validate import assert_valid, require
 
 TEXT = 'BT /F1 12 Tf 72 720 Td (repeated text) Tj ET\n' * 40
@@ -134,3 +135,31 @@ def test_reader_reads_back_compressed_output():
     again = PdfReader(io.BytesIO(out.getvalue()), decompress=True)
     assert [p.Contents.stream for p in again.pages] == [
         page_content(page_label(i)).decode('latin-1') for i in range(2)]
+
+
+@pytest.mark.parametrize('parms', [
+    b'[null]',                      # upstream PR #110
+    b'[null null]',
+    b'null',
+    b'[<< /Predictor 1 >>]',
+])
+def test_reader_decompresses_with_null_decodeparms(parms):
+    """A null /DecodeParms, or null entries in its array, mean the
+    filter's defaults: the stream decompresses instead of raising."""
+    builder = PdfBuilder()
+    catalog, pages = builder.alloc(), builder.alloc()
+    content = builder.stream(
+        zlib.compress(page_content(page_label(0))),
+        extra=b'/Filter [/FlateDecode] /DecodeParms ' + parms)
+    page = builder.obj(
+        b'<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] '
+        b'/Contents %d 0 R >>' % (pages, content))
+    builder.obj(b'<< /Type /Catalog /Pages %d 0 R >>' % pages, num=catalog)
+    builder.obj(b'<< /Type /Pages /Kids [%d 0 R] /Count 1 >>' % page,
+                num=pages)
+    builder.xref_table(b'/Root %d 0 R' % catalog)
+
+    reader = PdfReader(fdata=builder.getvalue(), decompress=True)
+    contents = reader.pages[0].Contents
+    assert contents.Filter is None
+    assert contents.stream == page_content(page_label(0)).decode('latin-1')

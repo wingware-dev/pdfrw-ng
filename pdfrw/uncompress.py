@@ -53,11 +53,16 @@ def uncompress(mylist, leave_raw=False, warnings=set(),
                 error = str(s)
             else:
                 error = None
+                # A null entry (or a null /DecodeParms) means the
+                # filter's defaults, as does anything else not a dict.
                 if isinstance(parms, PdfArray):
                     oldparms = parms
                     parms = PdfDict()
                     for x in oldparms:
-                        parms.update(x)
+                        if isinstance(x, PdfDict):
+                            parms.update(x)
+                elif not isinstance(parms, PdfDict):
+                    parms = None
                 if parms:
                     predictor = int(parms.Predictor or 1)
                     columns = int(parms.Columns or 1)

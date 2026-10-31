@@ -66,6 +66,9 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
 - Ctrl-C (KeyboardInterrupt) and SystemExit while a cross-reference
   table is parsed now reach the caller instead of being taken for a
   badly formatted table (upstream PR #256 by @koteshyelamati).
+- A stream whose `/DecodeParms` is `null`, or an array holding
+  `null`, is decompressed with the filter's defaults instead of
+  raising (upstream PR #110 by @erezarnon).
 
 ### Encryption
 
