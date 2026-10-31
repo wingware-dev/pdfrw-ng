@@ -333,6 +333,8 @@ def _later_version(version, minimum):
 class PdfWriter(object):
 
     _trailer = None
+    _built_trailer = None
+    _pages = None
     canonicalize = False
     fname = None
     encrypt = None
@@ -446,15 +448,19 @@ class PdfWriter(object):
         if self.canonicalize:
             self.make_canonical()
 
-        # Create the basic object structure of the PDF file
+        # Create the basic object structure of the PDF file.  The
+        # /Pages node starts from a copy of self.Pages, so the caller's
+        # dictionary is never changed.
+        pages = IndirectPdfDict(self._pages or ())
+        pages.indirect = True   # Copying a PdfDict copies its flag.
+        pages.Parent = None
+        pages.Type = PdfName.Pages
+        pages.Count = PdfObject(len(self.pagearray))
+        pages.Kids = self.pagearray
         trailer = PdfDict(
             Root=IndirectPdfDict(
                 Type=PdfName.Catalog,
-                Pages=IndirectPdfDict(
-                    Type=PdfName.Pages,
-                    Count=PdfObject(len(self.pagearray)),
-                    Kids=self.pagearray
-                )
+                Pages=pages,
             )
         )
         # Make all the pages point back to the page dictionary and
@@ -463,13 +469,42 @@ class PdfWriter(object):
         for page in pagedict.Kids:
             page.Parent = pagedict
             page.indirect = True
-        self._trailer = trailer
+        self._trailer = self._built_trailer = trailer
         return trailer
 
     def _set_trailer(self, trailer):
         self._trailer = trailer
 
     trailer = property(_get_trailer, _set_trailer)
+
+    def _get_pages(self):
+        return self._pages
+
+    def _set_pages(self, pages):
+        if pages is not None and not isinstance(pages, PdfDict):
+            raise TypeError('PdfWriter.Pages must be None or a PdfDict, '
+                            'not %s' % type(pages).__name__)
+        self._pages = pages
+        # Rebuild a trailer built from the old value, as addpage does.
+        # A trailer the caller set is theirs, and is kept.
+        if self._trailer is not None and self._trailer is \
+                self._built_trailer:
+            self._trailer = None
+
+    Pages = property(_get_pages, _set_pages, doc='''
+        None, or a PdfDict of entries for the /Pages node at the top of
+        the page tree the writer builds from the pages added with
+        addpage: inheritable page attributes such as /MediaBox,
+        /Resources, /CropBox or /Rotate, which every page that does not
+        set its own then uses.  It can also be given to the
+        constructor: PdfWriter(fname, Pages=PdfDict(MediaBox=...)).
+
+        The dictionary is copied when the file is written, and /Type,
+        /Kids and /Count are always the writer's own (any /Parent is
+        dropped), so the same dictionary can serve several writers.
+        It is not used when a trailer is given with trailer= or to
+        write(), since that trailer has its own page tree.
+        ''')
 
     def write(self, fname=None, trailer=None, user_fmt=user_fmt,
               disable_gc=True):

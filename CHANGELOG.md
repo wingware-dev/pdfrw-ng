@@ -171,6 +171,11 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   before the page now at that index instead of appending it, as
   `list.insert` places it. Negative indexes count from the end; one out
   of range raises IndexError (upstream PR #216 by @Lucas-C).
+- `PdfWriter.Pages` (also `PdfWriter(Pages=...)`) takes a `PdfDict` of
+  entries for the top /Pages node of the page tree the writer builds,
+  such as `/MediaBox` or `/Resources`, which pages that do not set
+  their own then inherit. The dictionary is copied, not changed
+  (upstream PR #205 by @Lucas-C).
 
 ### PageMerge, findobjs and logging
 

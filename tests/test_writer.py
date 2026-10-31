@@ -288,3 +288,110 @@ def test_addpage_at_index_must_be_an_integer(at_index):
     with pytest.raises(TypeError):
         writer.addpage(extra, at_index=at_index)
     assert len(writer.pagearray) == 3
+
+
+# -- upstream PR #205: PdfWriter.Pages ----------------------------------------
+
+def bare_page(text):
+    """A page with no /MediaBox or /Resources of its own."""
+    contents = IndirectPdfDict()
+    contents.stream = 'BT /F1 24 Tf 20 100 Td (%s) Tj ET' % text
+    return PdfDict(Type=PdfName.Page, Contents=contents)
+
+
+def shared_pages_node():
+    font = IndirectPdfDict(Type=PdfName.Font, Subtype=PdfName.Type1,
+                           BaseFont=PdfName.Helvetica)
+    return PdfDict(MediaBox=PdfArray([0, 0, 300, 400]),
+                   Resources=PdfDict(Font=PdfDict(F1=font)))
+
+
+def pdfium_sizes(data):
+    pdfium = require('pypdfium2')
+    doc = pdfium.PdfDocument(data)
+    try:
+        return [tuple(doc[i].get_size()) for i in range(len(doc))]
+    finally:
+        doc.close()
+
+
+@pytest.mark.parametrize('via_constructor', [False, True])
+def test_pages_entries_are_inherited(via_constructor):
+    """Pages with no /MediaBox or /Resources take them from the /Pages
+    node the writer builds from PdfWriter.Pages."""
+    node = shared_pages_node()
+    if via_constructor:
+        writer = PdfWriter(Pages=node)
+    else:
+        writer = PdfWriter()
+        writer.Pages = node
+    assert writer.Pages is node
+    writer.addpages([bare_page('One'), bare_page('Two')])
+    data = write_bytes(writer)
+    assert_valid(data, texts=['One', 'Two'])
+    assert pdfium_sizes(data) == [(300, 400)] * 2
+    root = PdfReader(fdata=data).Root.Pages
+    assert root.MediaBox == ['0', '0', '300', '400']
+    assert root.Count == '2'
+
+
+def test_pages_does_not_override_a_page_own_entries():
+    writer = PdfWriter(Pages=shared_pages_node())
+    writer.addpages(reader().pages)         # 612 x 792, own resources
+    writer.addpage(bare_page('Bare'))
+    data = write_bytes(writer)
+    assert_valid(data, texts=TEXTS + ['Bare'])
+    assert pdfium_sizes(data) == [(612, 792)] * 3 + [(300, 400)]
+
+
+def test_pages_dict_is_copied_not_changed():
+    """The writer's own /Type, /Kids and /Count win, any /Parent is
+    dropped, and the caller's dictionary is left as it was, so one can
+    serve several writers."""
+    node = shared_pages_node()
+    node.Type = PdfName.Bogus
+    node.Kids = PdfArray([bare_page('Stray')])
+    node.Count = 7
+    node.Parent = PdfDict(Type=PdfName.Pages)
+    before = dict(node)
+    for texts in (['A'], ['B', 'C']):
+        writer = PdfWriter(Pages=node)
+        writer.addpages([bare_page(t) for t in texts])
+        pages = writer.trailer.Root.Pages
+        assert pages is not node and pages.indirect
+        assert (pages.Type, pages.Count, pages.Parent) == \
+            (PdfName.Pages, str(len(texts)), None)
+        assert_valid(write_bytes(writer), texts=texts)
+    assert dict(node) == before
+
+
+def test_pages_set_after_trailer_built_is_used():
+    writer = PdfWriter()
+    writer.addpage(bare_page('Late'))
+    assert writer.trailer.Root.Pages.MediaBox is None
+    writer.Pages = shared_pages_node()
+    data = write_bytes(writer)
+    assert_valid(data, texts=['Late'])
+    assert pdfium_sizes(data) == [(300, 400)]
+
+
+def test_pages_leaves_a_given_trailer_alone():
+    src = reader()
+    writer = PdfWriter(trailer=src, Pages=shared_pages_node())
+    assert writer.trailer is src
+    data = write_bytes(writer)
+    assert_valid(data, texts=TEXTS)
+    assert pdfium_sizes(data) == [(612, 792)] * 3
+
+
+def test_pages_default_unchanged():
+    writer = PdfWriter()
+    assert writer.Pages is None
+    writer.addpages(reader().pages)
+    assert set(writer.trailer.Root.Pages) == {'/Type', '/Count', '/Kids'}
+
+
+@pytest.mark.parametrize('value', [{'/MediaBox': [0, 0, 1, 1]}, 'x'])
+def test_pages_must_be_a_pdfdict(value):
+    with pytest.raises(TypeError):
+        PdfWriter().Pages = value
