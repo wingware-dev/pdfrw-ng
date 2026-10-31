@@ -133,5 +133,5 @@ def page_per_xobj(xobj_iter, width=8.5 * 72, margin=0.0 * 72,
         xobj_iter = find_objects(xobj_iter)
     for obj in xobj_iter:
         if not ignore(obj):
-            if not image_only or obj.Subtype == PdfName.IMage:
+            if not image_only or obj.Subtype == PdfName.Image:
                 yield wrap_object(obj, width, margin)

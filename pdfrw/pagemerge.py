@@ -99,7 +99,7 @@ class RectXObj(PdfDict):
             self._rect[r_index], old = value, self._rect[r_index]
             self._matrix[m_index] += value - old
         else:
-            index = 2 + (value == 'h')
+            index = 2 + (name == 'h')
             self.scale(value / self._rect[index])
 
     def scale(self, x_scale, y_scale=None):

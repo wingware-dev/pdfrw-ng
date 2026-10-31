@@ -26,6 +26,17 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
 
 ### PageMerge, findobjs and logging
 
+- Setting `RectXObj.h` scales the object by its height. Before, it
+  scaled by the width, so the height ended up wrong (#219).
+- `page_per_xobj(..., image_only=True)` finds Image XObjects. A
+  `PdfName.IMage` typo meant it never matched anything (#152).
+- Importing pdfrw no longer attaches a StreamHandler to the `pdfrw`
+  logger or sets the logger's level. The logger gets only a
+  `NullHandler`, so the application's logging configuration decides
+  where pdfrw warnings go. `pdfrw.errors.handler` and
+  `pdfrw.errors.fmt` still exist but are no longer attached by default;
+  `log.addHandler(pdfrw.errors.handler)` restores the old output (#230).
+
 ### Examples
 
 ### Packaging
@@ -48,3 +59,10 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
 - Replaced Travis CI with GitHub Actions on Linux, macOS and Windows for
   CPython 3.11 to 3.15 and PyPy 3.11, with coverage and warnings as
   errors.
+- Rewrote README.rst for the fork. It covers installing `pdfrw-ng` from
+  source (it is not on PyPI), uninstalling `pdfrw`/`pdfrw2` first,
+  supported Python versions, running the offline tests, and credits for
+  Patrick Maupin and the other original authors. Fixed the dead
+  reportlab link (#225).
+- Listed every author named in LICENSE.txt in the `pyproject.toml`
+  `authors`.

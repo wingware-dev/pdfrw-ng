@@ -9,14 +9,19 @@ PDF Exceptions and error handling
 import logging
 
 
+# A library must leave output to the application: pdfrw only adds a
+# NullHandler, and its warnings appear wherever the application's
+# logging configuration sends them.
+log = logging.getLogger('pdfrw')
+log.addHandler(logging.NullHandler())
+
+# Kept for compatibility: before pdfrw-ng 0.5.0 this handler was attached
+# to `log` on import.  It no longer is; call log.addHandler(handler) to
+# get the old stderr output back.
 fmt = logging.Formatter('[%(levelname)s] %(filename)s:%(lineno)d %(message)s')
 
 handler = logging.StreamHandler()
 handler.setFormatter(fmt)
-
-log = logging.getLogger('pdfrw')
-log.setLevel(logging.WARNING)
-log.addHandler(handler)
 
 
 class PdfError(Exception):
