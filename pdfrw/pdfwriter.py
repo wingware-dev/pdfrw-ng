@@ -16,6 +16,7 @@ addpage() assumes that the pages are part of a valid
 tree/forest of PDF objects.
 '''
 import gc
+import io
 
 from .objects import (PdfName, PdfArray, PdfDict, IndirectPdfDict,
                       PdfObject, PdfString)
@@ -36,6 +37,15 @@ def user_fmt(obj, isinstance=isinstance, float=float, str=str,
 
     if isinstance(obj, basestring):
         return encode(obj)
+
+    # PDF booleans and null are lower case (#37, #127).  Test bool before
+    # float/int, since bool is a subclass of int.
+    if obj is True:
+        return 'true'
+    if obj is False:
+        return 'false'
+    if obj is None:
+        return 'null'
 
     # PDFs don't handle exponent notation
     if isinstance(obj, float):
@@ -346,21 +356,27 @@ class PdfWriter(object):
 
         fname = fname or self.fname
 
-        # Dump the data.  We either have a filename or a preexisting
+        # Format the whole file in memory first, so that an error while
+        # formatting never truncates or half-writes the target file
+        # (#135, #160).  We either have a filename or a preexisting
         # file object.
-        preexisting = hasattr(fname, 'write')
-        f = preexisting and fname or open(fname, 'wb')
+        buf = io.BytesIO()
         if disable_gc:
             gc.disable()
-
         try:
-            FormatObjects(f, trailer, self.version, self.compress,
+            FormatObjects(buf, trailer, self.version, self.compress,
                           self.killobj, user_fmt=user_fmt)
         finally:
-            if not preexisting:
-                f.close()
             if disable_gc:
                 gc.enable()
+        data = buf.getvalue()
+        del buf
+
+        if hasattr(fname, 'write'):
+            fname.write(data)
+        else:
+            with open(fname, 'wb') as f:
+                f.write(data)
 
     def make_canonical(self):
         ''' Canonicalizes a PDF.  Assumes everything

@@ -20,3 +20,14 @@ class PdfIndirect(tuple):
         if value is NotLoaded:
             value = self.value = self._loader(self)
         return value
+
+    def __reduce__(self, NotLoaded=_NotLoaded):
+        ''' Copy and pickle the reference and any loaded value, but not
+            the loader, which is bound to the PdfReader: copying a page
+            must not copy the whole reader (#141).  The reader stores
+            this object, already loaded, as the indirect attribute of
+            the object it refers to.
+        '''
+        value = self.value
+        state = None if value is NotLoaded else {'value': value}
+        return type(self), (tuple(self),), state

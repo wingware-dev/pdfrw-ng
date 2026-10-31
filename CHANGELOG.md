@@ -23,6 +23,35 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
 - Fixed invalid escape sequences in `pdfrw.objects.pdfstring`
   docstrings. They raised SyntaxWarning on Python 3.12+, and importing
   pdfrw failed under `-W error` (#170).
+- `PdfWriter.write` builds the whole file in memory before opening the
+  target, so a failure while writing leaves an existing file untouched
+  and writes nothing to a file object, instead of leaving a 0-byte or
+  truncated file (#135, #160).
+- Booleans are written as `true` and `false`, not `True` and `False`,
+  which qpdf read as null (#37, #127). Python `None` in an array is
+  written as `null`.
+- Carriage returns in literal strings are escaped as `\r`. Readers
+  turned a bare CR or CRLF into LF (#147).
+- `PdfDict.update` and `PdfDict.setdefault` check that every key is a
+  PdfName, as item assignment does, and raise `PdfParseError` before
+  changing anything. A str key used to fail only when the file was
+  written (#135). `update` treats keyword arguments as the constructor
+  does, and a value of None deletes the key.
+- `copy.copy`, `copy.deepcopy` and pickle work for `PdfDict`,
+  `PdfArray`, `PdfName` and `PdfIndirect`, including pages read from a
+  file, without copying the `PdfReader`. Attribute lookups of Python
+  special names such as `__deepcopy__` no longer read the dictionary
+  (#141).
+- Comparing `PdfDict` and `PdfArray` objects no longer raises
+  RecursionError on page trees and other cycles, or on long chains
+  (#212). Equality resolves indirect references and also compares
+  stream data, so different content streams of the same length are no
+  longer equal.
+- `PdfString.decode_hex` pads an odd-length hex string with a trailing
+  0, as the spec says, instead of raising `binascii.Error`.
+- A `#` in a name made with `PdfName(...)` is written as `#23`, as the
+  spec requires. `PdfName('A#41')` used to be written as `/A#41`, which
+  readers decode as `/AA`.
 
 ### PageMerge, findobjs and logging
 

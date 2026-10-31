@@ -393,8 +393,8 @@ class PdfString(str):
             in angle brackets <>.
         """
         hexstr = convert_store(''.join(self[1:-1].split()))
-        if len(hexstr) % 1: # odd number of chars indicates a truncated 0
-            hexstr += '0'
+        if len(hexstr) % 2: # odd number of chars indicates a truncated 0
+            hexstr += b'0'
         return binascii.unhexlify(hexstr)
 
 
@@ -441,7 +441,9 @@ class PdfString(str):
     def init_escapes(cls):
         """ Initialize the escape_splitter for the encode method
         """
-        cls.escape_splitter = re.compile(br'(\(|\\|\))').split
+        # CR must be escaped too: readers turn a bare CR or CRLF inside a
+        # literal string into LF (#147).
+        cls.escape_splitter = re.compile(br'(\(|\\|\)|\r)').split
         return cls.escape_splitter
 
     @classmethod
@@ -485,7 +487,8 @@ class PdfString(str):
             result = binascii.hexlify(raw).upper()
         else:
             fmt = '(%s)'
-            splitlist[1::2] = [(b'\\' + x) for x in splitlist[1::2]]
+            splitlist[1::2] = [(b'\\r' if x == b'\r' else b'\\' + x)
+                               for x in splitlist[1::2]]
             result = b''.join(splitlist)
 
         return cls(fmt % convert_load(result))

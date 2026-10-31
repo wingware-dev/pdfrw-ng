@@ -4,6 +4,7 @@
 
 from .pdfindirect import PdfIndirect
 from .pdfobject import PdfObject
+from ._compare import pdf_equal
 
 
 def _resolved():
@@ -69,3 +70,24 @@ class PdfArray(list):
     def __reversed__(self):
         self._resolve()
         return list.__reversed__(self)
+
+    def __eq__(self, other, pdf_equal=pdf_equal):
+        ''' Structural comparison that is safe for cycles (#212).
+        '''
+        if not isinstance(other, list):
+            return NotImplemented
+        return pdf_equal(self, other)
+
+    def __ne__(self, other):
+        result = self.__eq__(other)
+        return result if result is NotImplemented else not result
+
+    __hash__ = None
+
+    def __reduce_ex__(self, protocol):
+        ''' Copy and pickle the resolved items and the attributes (such as
+            indirect), but not the bound _resolve method (#141).
+        '''
+        state = dict((key, value) for key, value in vars(self).items()
+                     if key != '_resolve')
+        return type(self), (), state or None, iter(self)

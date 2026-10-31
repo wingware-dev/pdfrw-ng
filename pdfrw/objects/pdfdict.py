@@ -5,6 +5,7 @@
 from .pdfname import PdfName, BasePdfName
 from .pdfindirect import PdfIndirect
 from .pdfobject import PdfObject
+from ._compare import pdf_equal
 from ..py23_diffs import iteritems
 from ..errors import PdfParseError
 
@@ -17,6 +18,8 @@ class _DictSearch(object):
         self.basedict = basedict
 
     def __getattr__(self, name, PdfName=PdfName):
+        if name[:2] == name[-2:] == '__':
+            raise AttributeError(name)
         return self[PdfName(name)]
 
     def __getitem__(self, name, set=set, getattr=getattr, id=id):
@@ -122,12 +125,78 @@ class PdfDict(dict):
         for key, value in iteritems(kw):
             setattr(self, key, value)
 
+    def update(self, *args, **kw):
+        ''' Like dict.update, but every key must be a PdfName, as for
+            item assignment, and a value of None deletes its key.  Keyword
+            arguments are set as attributes, as in the constructor, so
+            d.update(Type=PdfName.Page) sets /Type.
+
+            The keys are checked before anything changes, so a bad key
+            leaves the dictionary as it was, instead of failing later
+            when the file is written (#135).
+        '''
+        if len(args) > 1:
+            raise TypeError('update expected at most 1 argument, got %d'
+                            % len(args))
+        if args:
+            other, = args
+            if isinstance(other, dict):
+                # Raw values, so indirect objects stay unresolved.
+                pairs = list(dict.items(other))
+            elif hasattr(other, 'keys'):
+                pairs = [(key, other[key]) for key in other.keys()]
+            else:
+                pairs = [tuple(pair) for pair in other]
+                for pair in pairs:
+                    if len(pair) != 2:
+                        raise ValueError('dictionary update sequence '
+                                         'element has length %d; 2 is '
+                                         'required' % len(pair))
+            for key, value in pairs:
+                if not isinstance(key, BasePdfName):
+                    raise PdfParseError('Dict key %s is not a PdfName'
+                                        % repr(key))
+            for key, value in pairs:
+                self[key] = value
+        for key, value in iteritems(kw):
+            setattr(self, key, value)
+
+    def setdefault(self, key, default=None):
+        ''' Like dict.setdefault, but the key must be a PdfName, indirect
+            objects are resolved, and a default of None is not stored
+            (#135).
+        '''
+        value = self.get(key)
+        if value is None:
+            self[key] = value = default
+        return value
+
     def __getattr__(self, name, PdfName=PdfName):
         ''' If the attribute doesn't exist on the dictionary object,
             try to slap a '/' in front of it and get it out
             of the actual dictionary itself.
+
+            Names like __deepcopy__ are Python protocol lookups, not PDF
+            names: they raise AttributeError, so that copy and pickle
+            work (#141).
         '''
+        if name[:2] == name[-2:] == '__':
+            raise AttributeError(name)
         return self.get(PdfName(name))
+
+    def __eq__(self, other, pdf_equal=pdf_equal):
+        ''' Structural comparison that is safe for the cycles in a page
+            tree (#212).  The streams of stream objects are compared too.
+        '''
+        if not isinstance(other, dict):
+            return NotImplemented
+        return pdf_equal(self, other)
+
+    def __ne__(self, other):
+        result = self.__eq__(other)
+        return result if result is NotImplemented else not result
+
+    __hash__ = None
 
     def get(self, key, dictget=dict.get, isinstance=isinstance,
             PdfIndirect=PdfIndirect):

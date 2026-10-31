@@ -26,7 +26,9 @@ class BasePdfName(str):
     encoded = None
 
     whitespace = '\x00 \t\f\r\n'
-    delimiters = '()<>{}[]/%'
+    # '#' is the escape character itself, so a literal '#' must be
+    # written as #23 (PDF 32000-1, 7.3.5), or readers decode '#41' as 'A'.
+    delimiters = '()<>{}[]/%#'
     forbidden = list(whitespace) + list('\\' + x for x in delimiters)
     remap = dict((x, '#%02X' % ord(x)) for x in (whitespace + delimiters))
     split_to_encode = re.compile('(%s)' % '|'.join(forbidden)).split
@@ -58,6 +60,13 @@ class BasePdfName(str):
             self.encoded = encoded
         return self
 
+    def __getnewargs__(self):
+        ''' Rebuild exactly the same name on copy or unpickle (#141).
+        '''
+        if self.encoded is not None:
+            return self.encoded, True
+        return str(self), False
+
 
 # We could have used a metaclass, but this matches what
 # we were doing historically.
@@ -73,6 +82,9 @@ class PdfName(object):
     '''
 
     def __getattr__(self, name, BasePdfName=BasePdfName):
+        if name[:2] == name[-2:] == '__':
+            # Python protocol lookups (copy, pickle, ...) are not names.
+            raise AttributeError(name)
         return BasePdfName('/' + name, False)
 
     def __call__(self, name, BasePdfName=BasePdfName):
