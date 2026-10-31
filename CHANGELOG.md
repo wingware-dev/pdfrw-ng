@@ -34,6 +34,15 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   a copy wrote into its own trailer.
 - A `/Prev` chain that loops back on itself is read once, with a
   warning, instead of hanging.
+- A damaged page tree no longer loses every page. One dangling `/Kids`
+  reference, or a `/Pages` node without `/Type`, used to give 0 pages,
+  and a copy written from the reader had none. Now only the bad node is
+  skipped, with a warning, as PDFium and pypdf do. Kids that are not
+  dictionaries are skipped. A node with `/Kids` but no `/Type` is read
+  as `/Pages`, and a kid with neither as `/Page`. Leaves with any other
+  `/Type` are skipped, and so is a `/Pages` node that loops back to its
+  own ancestor. The tree is repaired to match, so written copies show
+  the same pages.
 
 ### Encryption
 

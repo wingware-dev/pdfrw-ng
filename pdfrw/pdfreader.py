@@ -592,33 +592,107 @@ class PdfReader(PdfDict):
             entries.setdefault(objnum, entry)
 
     def readpages(self, node):
+        ''' Return the document's pages, in order, from the page tree
+            under `node` (the catalog, or a /Pages node).
+
+            A bad node costs only itself, with a warning, never the whole
+            tree (as PDFium, pypdf and qpdf read it):
+              - a kid that is not a dictionary, such as a reference to a
+                missing object, is skipped;
+              - a node with /Kids but no /Type is a /Pages node, and a
+                kid with neither is a /Page;
+              - a kid with some other /Type and no /Kids is skipped;
+              - a /Pages node that is its own ancestor is skipped.
+            The tree is repaired to match: skipped kids are dropped from
+            /Kids and missing /Type entries are added, so a copy written
+            from this reader shows the same pages.
+        '''
         pagename = PdfName.Page
         pagesname = PdfName.Pages
         catalogname = PdfName.Catalog
-        typename = PdfName.Type
-        kidname = PdfName.Kids
+        kidsname = PdfName.Kids
 
-        try:
-            result = []
-            stack = [node]
-            append = result.append
-            pop = stack.pop
-            while stack:
-                node = pop()
-                nodetype = node[typename]
-                if nodetype == pagename:
-                    append(node)
-                elif nodetype == pagesname:
-                    stack.extend(reversed(node[kidname]))
-                elif nodetype == catalogname:
-                    stack.append(node[pagesname])
-                else:
-                    log.error('Expected /Page or /Pages dictionary, got %s' %
-                            repr(node))
+        def describe(obj):
+            indirect = getattr(obj, 'indirect', None)
+            if isinstance(indirect, tuple):
+                return 'object %d %d' % indirect
+            text = repr(obj)
+            return text if len(text) <= 60 else text[:57] + '...'
+
+        result = []
+        if not isinstance(node, PdfDict):
+            log.error('Invalid page tree: no catalog or /Pages '
+                      'dictionary (got %s)', describe(node))
             return result
-        except (AttributeError, TypeError) as s:
-            log.error('Invalid page tree: %s' % s)
-            return []
+
+        # Each stack entry is (node, ids of its /Pages ancestors).
+        stack = [(node, frozenset())]
+        is_root = True
+        while stack:
+            node, ancestors = stack.pop()
+            nodetype = node.Type
+            kids = node[kidsname]
+
+            if is_root and kids is None and (
+                    nodetype == catalogname or
+                    (nodetype is None and node.Pages is not None)):
+                is_root = False
+                pages = node[pagesname]
+                if not isinstance(pages, PdfDict):
+                    log.error('Invalid page tree: catalog /Pages is %s',
+                              describe(pages))
+                    return result
+                stack.append((pages, ancestors))
+                continue
+            is_root = False
+
+            if nodetype == pagename:
+                result.append(node)
+                continue
+
+            if kids is None:
+                if nodetype is None:
+                    log.warning('Page tree node %s has no /Type; reading '
+                                'it as a /Page', describe(node))
+                    node.Type = pagename
+                    result.append(node)
+                else:
+                    log.warning('Skipping page tree node %s: /Type is %s, '
+                                'not /Page or /Pages', describe(node),
+                                nodetype)
+                continue
+
+            if nodetype != pagesname:
+                log.warning('Page tree node %s has /Kids but /Type %s; '
+                            'reading it as /Pages', describe(node), nodetype)
+                node.Type = pagesname
+            if not isinstance(kids, list):
+                log.warning('Skipping /Kids of page tree node %s: not an '
+                            'array', describe(node))
+                continue
+
+            ancestors = ancestors | frozenset([id(node)])
+            good = []
+            for kid in kids:
+                if not isinstance(kid, PdfDict):
+                    log.warning('Skipping page tree kid of %s that is not '
+                                'a dictionary: %s', describe(node),
+                                describe(kid))
+                elif id(kid) in ancestors:
+                    log.warning('Skipping page tree kid %s of %s: it is '
+                                'its own ancestor (a loop)', describe(kid),
+                                describe(node))
+                elif (kid[kidsname] is None and kid.Type is not None and
+                        kid.Type not in (pagename, pagesname)):
+                    log.warning('Skipping page tree node %s: /Type is %s, '
+                                'not /Page or /Pages', describe(kid),
+                                kid.Type)
+                else:
+                    good.append(kid)
+            if len(good) != len(kids):
+                node[kidsname] = PdfArray(good)
+            stack.extend((kid, ancestors) for kid in reversed(good))
+        return result
 
     def _parse_encrypt_info(self, source, password, trailer):
         """Check password and initialize crypt filters."""
