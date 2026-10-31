@@ -315,3 +315,44 @@ def test_objstm_member_missing_from_stream(caplog):
     assert labels_of(reader) == [page_label(0)]
     assert any('is not in object stream' in r.getMessage()
                for r in caplog.records)
+
+
+# -- exceptions the xref table parser must not swallow (upstream PR #256) --
+
+class _InterruptedFdata(str):
+    """File data whose search is interrupted, as by Ctrl-C."""
+
+    def rindex(self, *args):
+        raise KeyboardInterrupt
+
+
+class _XrefSource(object):
+    """Just enough of PdfTokens for parse_xref_table."""
+
+    def __init__(self, tokens, fdata=''):
+        self.tokens = iter(tokens)
+        self.fdata = fdata
+        self.floc = 0
+
+    def next(self):
+        tok = next(self.tokens)
+        if isinstance(tok, BaseException):
+            raise tok
+        return tok
+
+    def exception(self, *args):
+        raise AssertionError('error path reached: %r' % (args,))
+
+
+@pytest.mark.parametrize('tokens, fdata', [
+    # interrupted while reading the well-formed table
+    (['0', '1', KeyboardInterrupt()], ''),
+    # table malformed, then interrupted while trying to recover it
+    (['0', '1', '0', '65535', 'x'], _InterruptedFdata('')),
+])
+def test_xref_table_does_not_swallow_keyboard_interrupt(tokens, fdata):
+    """KeyboardInterrupt (and SystemExit) reach the caller instead of
+    being taken for a badly formatted table."""
+    reader = read(make_pdf(1))
+    with pytest.raises(KeyboardInterrupt):
+        reader.parse_xref_table(_XrefSource(tokens, fdata))

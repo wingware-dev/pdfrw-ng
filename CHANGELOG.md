@@ -63,6 +63,9 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
     non-numeric or missing ends the stream at `endstream` (#199).
   - The tokenizer no longer raises RuntimeError at the end of data
     on Python 3.7+ (it used `raise StopIteration` in a generator).
+- Ctrl-C (KeyboardInterrupt) and SystemExit while a cross-reference
+  table is parsed now reach the caller instead of being taken for a
+  badly formatted table (upstream PR #256 by @koteshyelamati).
 
 ### Encryption
 
