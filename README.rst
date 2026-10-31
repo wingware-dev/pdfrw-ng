@@ -35,7 +35,7 @@ fork: they would overwrite each other's files.  Uninstall them first:
     $ cd path/to/pdfrw-ng
     $ pip install .
 
-To read encrypted PDFs that use AES, also install the optional
+To read or write encrypted PDFs that use AES, also install the optional
 ``crypto`` extra, which pulls in pycryptodome:
 
 .. code-block:: bash
@@ -478,8 +478,10 @@ does not currently support:
    such as certificate encryption.  The standard handler is supported
    with RC4 (40 to 128 bit), AES-128 and AES-256 (revisions 2 to 6);
    AES needs the ``crypto`` extra.
--  Writing encrypted files.  A copy written from an encrypted file is
-   not encrypted.
+-  Writing encrypted files with RC4 40-bit or certificate encryption.
+   Output is unencrypted unless asked for; ``PdfWriter(...,
+   encrypt=Encryption(...))`` writes AES-256, AES-128 or RC4 128-bit
+   (see `File output`_).
 
 `CHANGELOG.md`__ lists what this fork has added.
 
@@ -689,7 +691,8 @@ anyone can open needs no password; otherwise pass the user or owner
 password as ``PdfReader(..., password='...')``.  Without it, or when
 the encryption is not supported, PdfReader raises
 ``PdfDecryptionError`` (a ``PdfParseError``).  A copy written from the
-reader is not encrypted.  ``decrypt=True`` is still accepted; it now
+reader is not encrypted unless you give PdfWriter an ``encrypt=``
+option (see `File output`_).  ``decrypt=True`` is still accepted; it now
 only reads every object up front.
 If you have PDF files that are encrypted in other ways or heavily
 compressed, you may find that using another program like pdftk or qpdf
@@ -719,6 +722,39 @@ If you have a source PDF and do not want to disturb the structure
 of it too badly, then you may pass its trailer directly to PdfWriter
 rather than letting PdfWriter construct one for you.  There is an
 example of this (alter.py) in the examples directory.
+
+Output is unencrypted unless you pass ``encrypt=``, an ``Encryption``
+giving the passwords, method and permissions:
+
+.. code-block:: python
+
+    from pdfrw import PdfReader, PdfWriter, Encryption
+
+    reader = PdfReader('in.pdf', password='old')
+    PdfWriter('out.pdf', trailer=reader,
+              encrypt=Encryption(user_password='open me',
+                                 owner_password='full rights')).write()
+
+``Encryption(user_password='', owner_password=None, method='aes-256',
+permissions=-4, encrypt_metadata=True)``:
+
+-  An empty user password lets anyone open the file; the owner
+   password (the user password when None) opens it with every
+   permission.
+-  ``method`` is ``'aes-256'`` (revision 6), ``'aes-128'`` or
+   ``'rc4-128'`` (weak; only for old readers).  AES needs the
+   ``crypto`` extra; without it ``Encryption`` raises
+   ``PdfOutputError`` saying what to install.  The file is written as
+   at least the PDF version the method needs: 2.0, 1.6 or 1.4.
+-  ``permissions`` is the ``/P`` value (PDF 32000-2 Table 22: 4 print,
+   8 modify, 16 copy text, 32 annotate, 256 fill forms, 512 extract
+   for accessibility, 1024 assemble, 2048 high-quality print); the
+   default allows everything.  Viewers honour them; nothing enforces
+   them.
+-  ``encrypt_metadata=False`` (AES only) leaves XMP metadata readable.
+
+Each write makes new keys, so two writes of the same document differ.
+The document's ``/ID`` is kept, or made when it has none.
 
 
 Advanced features

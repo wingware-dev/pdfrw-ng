@@ -21,6 +21,7 @@ import io
 from .objects import (PdfName, PdfArray, PdfDict, IndirectPdfDict,
                       PdfObject, PdfString)
 from .compress import compress as do_compress
+from .crypt import Encryption
 from .errors import PdfOutputError, log
 from .py23_diffs import iteritems, convert_store
 
@@ -60,10 +61,15 @@ def FormatObjects(f, trailer, version='1.3', compress=True, killobj=(),
                   id=id, isinstance=isinstance, getattr=getattr, len=len,
                   sum=sum, set=set, str=str, hasattr=hasattr, repr=repr,
                   enumerate=enumerate, list=list, dict=dict, tuple=tuple,
-                  PdfArray=PdfArray, PdfDict=PdfDict, PdfObject=PdfObject):
+                  PdfArray=PdfArray, PdfDict=PdfDict, PdfObject=PdfObject,
+                  encryption=None):
     ''' FormatObjects performs the actual formatting and disk write.
         Should be a class, was a class, turned into nested functions
         for performace (to reduce attribute lookups).
+
+        `encryption`, a `crypt.EncryptionWriter`, encrypts the strings
+        and streams of each indirect object, and adds its /Encrypt and
+        /ID to (a copy of) the trailer.
     '''
 
     def f_write(s):
@@ -147,14 +153,31 @@ def FormatObjects(f, trailer, version='1.3', compress=True, killobj=(),
                 elif isinstance(obj, PdfDict):
                     if compress and obj.stream:
                         do_compress([obj])
-                    pairs = sorted((getattr(x, 'encoded', None) or x, y)
-                                   for (x, y) in obj.iteritems())
+                    pairs = [(getattr(x, 'encoded', None) or x, y)
+                             for (x, y) in obj.iteritems()]
+                    stream = obj.stream
+                    num = crypt_num
+                    if num is not None:
+                        if stream is not None:
+                            stream = encryption.encrypt_stream(num, obj,
+                                                               stream)
+                            pairs = [x for x in pairs if x[0] != '/Length']
+                            pairs.append(('/Length', PdfObject(len(stream))))
+                        # A signature's /Contents is not encrypted.
+                        signature = (dict.get(obj, PdfName.Type) ==
+                                     PdfName.Sig or PdfName.ByteRange in obj)
+                    pairs.sort()
                     myarray = []
                     for key, value in pairs:
                         myarray.append(key)
-                        myarray.append(add(value))
+                        if num is not None and signature and \
+                                key == '/Contents':
+                            set_crypt_num(None)
+                            myarray.append(add(value))
+                            set_crypt_num(num)
+                        else:
+                            myarray.append(add(value))
                     result = format_array(myarray, '<<%s>>')
-                    stream = obj.stream
                     if stream is not None:
                         result = ('%s\nstream\n%s\nendstream' %
                                   (result, stream))
@@ -164,14 +187,26 @@ def FormatObjects(f, trailer, version='1.3', compress=True, killobj=(),
 
             # We assume that an object with an indirect
             # attribute knows how to represent itself to us.
+            if crypt_num is not None and (
+                    isinstance(obj, PdfString) or
+                    (isinstance(obj, basestring) and
+                     not hasattr(obj, 'indirect'))):
+                return str(encryption.encrypt_string(crypt_num, obj))
             if hasattr(obj, 'indirect'):
                 return str(getattr(obj, 'encoded', None) or obj)
             return user_fmt(obj)
 
+    def set_crypt_num(num):
+        nonlocal crypt_num
+        crypt_num = num
+
     def format_deferred():
         while deferred:
             index, obj = deferred.pop()
+            if encryption is not None and obj is not encrypt_dict:
+                set_crypt_num(index + 1)
             objlist[index] = format_obj(obj)
+            set_crypt_num(None)
 
     indirect_dict = {}
     indirect_dict_get = indirect_dict.get
@@ -184,6 +219,17 @@ def FormatObjects(f, trailer, version='1.3', compress=True, killobj=(),
     lf_join = '\n  '.join
 
     deferred = []
+
+    # The number of the indirect object being formatted, when its strings
+    # and stream are to be encrypted.
+    crypt_num = None
+    basestring = (str, bytes)
+    encrypt_dict = None
+    if encryption is not None:
+        encrypt_dict = encryption.encrypt_dict
+        trailer = PdfDict(trailer)
+        trailer.Encrypt = encrypt_dict
+        trailer.ID = encryption.file_id
 
     # Don't reference old catalog or pages objects --
     # swap references to new ones.
@@ -231,13 +277,25 @@ def FormatObjects(f, trailer, version='1.3', compress=True, killobj=(),
     f_write('trailer\n\n%s\nstartxref\n%s\n%%%%EOF\n' % (trailer, offset))
 
 
+def _later_version(version, minimum):
+    ''' The later of two PDF versions, such as '1.3' and '2.0'. '''
+    def key(value):
+        try:
+            return tuple(int(x) for x in str(value).split('.'))
+        except ValueError:
+            return ()
+    return version if key(version) >= key(minimum) else minimum
+
+
 class PdfWriter(object):
 
     _trailer = None
     canonicalize = False
     fname = None
+    encrypt = None
 
-    def __init__(self, fname=None, version='1.3', compress=False, **kwargs):
+    def __init__(self, fname=None, version='1.3', compress=False,
+                 encrypt=None, **kwargs):
         """
             Parameters:
                 fname -- Output file name, or file-like binary object
@@ -246,6 +304,10 @@ class PdfWriter(object):
                            supported.
                 compress -- True to do compression on output.  Currently
                             compresses stream objects.
+                encrypt -- None (the default) to write the file
+                           unencrypted, or a `pdfrw.Encryption` giving
+                           the passwords, method and permissions to
+                           encrypt it with.
         """
 
         # Legacy support:  fname is new, was added in front
@@ -264,6 +326,10 @@ class PdfWriter(object):
         self.fname = fname
         self.version = version
         self.compress = compress
+        if encrypt is not None and not isinstance(encrypt, Encryption):
+            raise TypeError('encrypt must be None or a pdfrw.Encryption, '
+                            'not %s' % type(encrypt).__name__)
+        self.encrypt = encrypt
 
         if kwargs:
             for name, value in iteritems(kwargs):
@@ -360,12 +426,19 @@ class PdfWriter(object):
         # formatting never truncates or half-writes the target file
         # (#135, #160).  We either have a filename or a preexisting
         # file object.
+        version = self.version
+        encryption = None
+        if self.encrypt is not None:
+            encryption = self.encrypt.start(trailer.ID)
+            version = _later_version(version, self.encrypt.pdf_version)
+
         buf = io.BytesIO()
         if disable_gc:
             gc.disable()
         try:
-            FormatObjects(buf, trailer, self.version, self.compress,
-                          self.killobj, user_fmt=user_fmt)
+            FormatObjects(buf, trailer, version, self.compress,
+                          self.killobj, user_fmt=user_fmt,
+                          encryption=encryption)
         finally:
             if disable_gc:
                 gc.enable()

@@ -2,9 +2,10 @@
 # Copyright (C) 2017  Jon Lund Steffensen
 # MIT license -- See LICENSE.txt for details
 
-"""Decryption for the PDF standard (password) security handler.
+"""Encryption and decryption for the PDF standard (password) security
+handler.
 
-PDF 32000-2:2020 section 7.6.  Supported:
+PDF 32000-2:2020 section 7.6.  Supported for reading:
 
 - RC4, 40 to 128 bits (/V 1, 2 and 4, revisions 2 to 4), built in.
 - AES-128 (/AESV2, /V 4) and AES-256 (/AESV3, /V 5, revisions 5 and 6),
@@ -12,10 +13,16 @@ PDF 32000-2:2020 section 7.6.  Supported:
 
 `PdfReader` makes a `SecurityHandler` from the file's /Encrypt
 dictionary and password, and decrypts each object's strings and stream
-as the object is read.  All the arithmetic here is on bytes.
+as the object is read.
+
+For writing, `Encryption` describes how `PdfWriter(..., encrypt=...)`
+encrypts its output: AES-256 (revision 6, the default), AES-128
+(revision 4) or RC4 128-bit (revision 3).  All the arithmetic here is
+on bytes.
 """
 
 import hashlib
+import os
 import stringprep
 import unicodedata
 
@@ -29,8 +36,8 @@ try:
 except ImportError:
     _ARC4 = None
 
-from .errors import PdfDecryptionError, log
-from .objects import PdfDict, PdfArray, PdfName, PdfString
+from .errors import PdfDecryptionError, PdfOutputError, log
+from .objects import PdfDict, PdfArray, PdfName, PdfObject, PdfString
 from .py23_diffs import convert_load, convert_store
 
 #: Whether pycryptodome is installed.  AES needs it; RC4 does not.
@@ -41,6 +48,9 @@ _PASSWORD_PAD = (b'(\xbfN^Nu\x8aAd\x00NV\xff\xfa\x01\x08'
 
 _NEEDS_PYCRYPTODOME = ('This PDF is encrypted with AES, which needs '
                        'pycryptodome: pip install "pdfrw-ng[crypto]"')
+
+_WRITE_NEEDS_PYCRYPTODOME = ('Encrypting with %s needs pycryptodome: '
+                             'pip install "pdfrw-ng[crypto]"')
 
 
 # -- primitives ------------------------------------------------------------
@@ -88,6 +98,15 @@ def _aes_decrypt(key, data):
         return plain[:-pad]
     log.warning('Invalid padding in AES-encrypted data; keeping all of it')
     return plain
+
+
+def _aes_encrypt(key, data):
+    """AES-CBC encrypt `data` with PKCS#7 padding and a random IV, which
+    is put first."""
+    iv = os.urandom(16)
+    pad = 16 - len(data) % 16
+    return iv + AES.new(key, AES.MODE_CBC, iv).encrypt(
+        data + bytes((pad,)) * pad)
 
 
 def _object_key(key, num, gen, salt=b''):
@@ -324,6 +343,8 @@ class IdentityCryptFilter(object):
     def decrypt_data(self, num, gen, data):
         return data
 
+    encrypt_data = decrypt_data
+
 
 class RC4CryptFilter(object):
     """Crypt filter /V2 (and the RC4 of /V 1 and 2): RC4 with a key per
@@ -336,6 +357,8 @@ class RC4CryptFilter(object):
     def decrypt_data(self, num, gen, data):
         return rc4(_object_key(self._key, num, gen), data)
 
+    encrypt_data = decrypt_data
+
 
 class AESCryptFilter(object):
     """Crypt filter /AESV2: AES-128 with a key per object."""
@@ -347,6 +370,9 @@ class AESCryptFilter(object):
     def decrypt_data(self, num, gen, data):
         return _aes_decrypt(_object_key(self._key, num, gen, b'sAlT'), data)
 
+    def encrypt_data(self, num, gen, data):
+        return _aes_encrypt(_object_key(self._key, num, gen, b'sAlT'), data)
+
 
 class AESV3CryptFilter(object):
     """Crypt filter /AESV3: AES-256 with the file key."""
@@ -357,6 +383,9 @@ class AESV3CryptFilter(object):
 
     def decrypt_data(self, num, gen, data):
         return _aes_decrypt(self._key, data)
+
+    def encrypt_data(self, num, gen, data):
+        return _aes_encrypt(self._key, data)
 
 
 _CRYPT_METHODS = {
@@ -628,6 +657,213 @@ def _decrypt_stream(obj, num, gen, default_filter, filters):
         data = convert_store(data)
     obj.stream = convert_load(crypt_filter.decrypt_data(num, gen, data))
     obj.private.decrypted = True
+
+
+# -- encrypting output -----------------------------------------------------
+
+# method: (/V, /R, key bytes, crypt filter method, lowest PDF version)
+_WRITE_METHODS = {
+    'aes-256': (5, 6, 32, PdfName.AESV3, '2.0'),
+    'aes-128': (4, 4, 16, PdfName.AESV2, '1.6'),
+    'rc4-128': (2, 3, 16, None, '1.4'),
+}
+
+
+def _hex(data):
+    return PdfString.from_bytes(data, 'hex')
+
+
+def _owner_hash_r4(owner, user, length):
+    """The /O value (Algorithm 3, revisions 3 and 4) for the passwords
+    `owner` and `user` (bytes, unpadded)."""
+    digest = hashlib.md5((owner + _PASSWORD_PAD)[:32]).digest()
+    for _ in range(50):
+        digest = hashlib.md5(digest).digest()
+    key = digest[:length]
+    data = rc4(key, (user + _PASSWORD_PAD)[:32])
+    for i in range(1, 20):
+        data = rc4(bytes(b ^ i for b in key), data)
+    return data
+
+
+class Encryption(object):
+    """How `PdfWriter` encrypts its output, with the standard (password)
+    security handler: ``PdfWriter(f, encrypt=Encryption(...))``.
+
+    `user_password` opens the file; an empty one (the default) lets
+    anyone open it, subject to `permissions`.  `owner_password` opens it
+    with every permission; when None it is the user password.
+    Passwords are str or bytes; for AES-256 a str is prepared with
+    SASLprep and UTF-8 encoded, and for the others it must be in
+    PDFDocEncoding (Latin-1, roughly).
+
+    `method` is ``'aes-256'`` (revision 6, the default), ``'aes-128'``
+    (revision 4) or ``'rc4-128'`` (revision 3, weak; only for old
+    readers).  AES needs pycryptodome: ``pip install
+    'pdfrw-ng[crypto]'``.
+
+    `permissions` is the /P value, the bits of PDF 32000-2:2020 Table 22
+    (4 print, 8 modify, 16 copy text, 32 annotate, 256 fill forms, 512
+    extract for accessibility, 1024 assemble, 2048 high-quality print);
+    the default -4 allows everything.  Reserved bits are set as the
+    standard requires.  Readers that are not given the owner password
+    are expected, not forced, to honour them.
+
+    `encrypt_metadata=False` leaves XMP metadata streams readable
+    without the password (AES only).
+
+    The file is written as at least the PDF version the method needs:
+    1.4 for RC4, 1.6 for AES-128 and 2.0 for AES-256.
+    """
+
+    def __init__(self, user_password='', owner_password=None,
+                 method='aes-256', permissions=-4, encrypt_metadata=True):
+        method = str(method).lower()
+        if method not in _WRITE_METHODS:
+            raise ValueError('Unknown encryption method %r; use one of %s'
+                             % (method, ', '.join(sorted(_WRITE_METHODS))))
+        version, revision, length, cfm, pdf_version = _WRITE_METHODS[method]
+        if cfm is not None and AES is None:
+            raise PdfOutputError(_WRITE_NEEDS_PYCRYPTODOME % method.upper())
+        if not encrypt_metadata and revision < 4:
+            raise ValueError('encrypt_metadata=False needs AES encryption')
+        if owner_password is None:
+            owner_password = user_password
+        self.method = method
+        self.version, self.revision, self.length = version, revision, length
+        self.cfm = cfm
+        self.pdf_version = pdf_version
+        self.user = self._password(user_password, 'user')
+        self.owner = self._password(owner_password, 'owner')
+        self.permissions = _signed32((_int(permissions) | 0xFFFFF0C0) &
+                                     0xFFFFFFFC)
+        self.encrypt_metadata = bool(encrypt_metadata)
+
+    def __repr__(self):
+        return '<Encryption %s>' % self.method
+
+    def _password(self, password, which):
+        if isinstance(password, (bytes, bytearray)):
+            data = bytes(password)
+        elif not isinstance(password, str):
+            raise TypeError('The %s password must be str or bytes, not %s'
+                            % (which, type(password).__name__))
+        elif self.revision >= 5:
+            try:
+                data = saslprep(password).encode('utf-8')
+            except ValueError as exc:
+                raise ValueError('The %s password is not valid for AES-256 '
+                                 'encryption: %s' % (which, exc))
+        else:
+            try:
+                data = password.encode('pdfdocencoding')
+            except UnicodeEncodeError:
+                raise ValueError(
+                    'The %s password has characters that %s encryption '
+                    'cannot use (it needs PDFDocEncoding); use AES-256 for '
+                    'other characters' % (which, self.method.upper()))
+        return data[:127] if self.revision >= 5 else data[:32]
+
+    def start(self, file_id=None):
+        """Set up encrypting one file whose trailer /ID is `file_id`
+        (made when missing or malformed).  Returns an
+        `EncryptionWriter`; each call makes new keys and salts."""
+        if not (isinstance(file_id, list) and len(file_id) == 2 and
+                all(isinstance(x, PdfString) for x in file_id)):
+            first = _hex(os.urandom(16))
+            file_id = PdfArray([first, _hex(first.to_bytes())])
+        else:
+            file_id = PdfArray(file_id)
+        return EncryptionWriter(self, file_id)
+
+
+class EncryptionWriter(object):
+    """The keys and /Encrypt dictionary for one encrypted file.
+
+    `encrypt_dict` and `file_id` go in the trailer; `encrypt_string`
+    and `encrypt_stream` encrypt the data of object number `num`.
+    """
+
+    def __init__(self, settings, file_id):
+        self.file_id = file_id
+        self.encrypt_metadata = settings.encrypt_metadata
+        revision = settings.revision
+        encrypt = PdfDict(Filter=PdfName.Standard,
+                          V=PdfObject(settings.version),
+                          R=PdfObject(revision),
+                          Length=PdfObject(settings.length * 8),
+                          P=PdfObject(settings.permissions))
+        encrypt.indirect = True
+        if revision >= 5:
+            key = self._setup_r6(settings, encrypt)
+        else:
+            key = self._setup_r4(settings, encrypt)
+        self.key = key
+        if settings.cfm is None:
+            self.filter = RC4CryptFilter(key)
+        else:
+            encrypt.CF = PdfDict(StdCF=PdfDict(
+                AuthEvent=PdfName.DocOpen, CFM=settings.cfm,
+                Length=PdfObject(settings.length)))
+            encrypt.StmF = encrypt.StrF = PdfName.StdCF
+            self.filter = _CRYPT_METHODS[settings.cfm](key)
+            if not settings.encrypt_metadata:
+                encrypt.EncryptMetadata = PdfObject('false')
+        self.encrypt_dict = encrypt
+
+    def _setup_r6(self, settings, encrypt):
+        """Algorithms 8 to 10."""
+        key = os.urandom(32)
+        salts = os.urandom(32)
+        user, owner = settings.user, settings.owner
+        u_hash = (_hash_r6(user, salts[:8], b'', 6) + salts[:16])
+        ue = AES.new(_hash_r6(user, salts[8:16], b'', 6), AES.MODE_CBC,
+                     b'\0' * 16).encrypt(key)
+        o_hash = (_hash_r6(owner, salts[16:24], u_hash, 6) + salts[16:32])
+        oe = AES.new(_hash_r6(owner, salts[24:32], u_hash, 6), AES.MODE_CBC,
+                     b'\0' * 16).encrypt(key)
+        perms = ((settings.permissions & 0xFFFFFFFF).to_bytes(4, 'little') +
+                 b'\xff' * 4 +
+                 (b'T' if settings.encrypt_metadata else b'F') + b'adb' +
+                 os.urandom(4))
+        encrypt.U, encrypt.UE = _hex(u_hash), _hex(ue)
+        encrypt.O, encrypt.OE = _hex(o_hash), _hex(oe)
+        encrypt.Perms = _hex(AES.new(key, AES.MODE_ECB).encrypt(perms))
+        return key
+
+    def _setup_r4(self, settings, encrypt):
+        """Algorithms 2, 3 and 5."""
+        revision, length = settings.revision, settings.length
+        id0 = self.file_id[0].to_bytes()
+        o_hash = _owner_hash_r4(settings.owner, settings.user, length)
+        key = _file_key_r4(settings.user, o_hash, settings.permissions, id0,
+                           revision, length, settings.encrypt_metadata)
+        u_hash = _user_hash_r4(key, id0, revision) + os.urandom(16)
+        encrypt.O, encrypt.U = _hex(o_hash), _hex(u_hash)
+        return key
+
+    def encrypt_string(self, num, value):
+        """The PdfString `value` (or a str or bytes to write as a PDF
+        string) encrypted for object `num`."""
+        if not isinstance(value, PdfString):
+            value = PdfString.encode(value)
+        return PdfString.from_bytes(
+            self.filter.encrypt_data(num, 0, value.to_bytes()))
+
+    def encrypt_stream(self, num, obj, data):
+        """`data`, the stream of the PdfDict `obj`, encrypted for object
+        `num`.  Strings in, strings out, as `PdfDict.stream` holds."""
+        if (not self.encrypt_metadata and
+                dict.get(obj, PdfName.Type) == PdfName.Metadata):
+            return data
+        if not isinstance(data, bytes):
+            data = convert_store(data)
+        return convert_load(self.filter.encrypt_data(num, 0, data))
+
+
+def _signed32(value):
+    value &= 0xFFFFFFFF
+    return value - (1 << 32) if value & 0x80000000 else value
 
 
 # -- the upstream pdfrw 0.4 interface, kept for compatibility -------------

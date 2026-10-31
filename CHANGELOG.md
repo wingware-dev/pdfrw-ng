@@ -87,7 +87,13 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   `/EncryptMetadata` is false are left as stored. A stream's own
   `/Crypt` filter is honoured and then removed.
 - A copy written from an encrypted file is a complete unencrypted PDF:
-  its trailer has no `/Encrypt`.
+  its trailer has no `/Encrypt`, unless the writer is asked to encrypt.
+- `PdfWriter(..., encrypt=Encryption(user_password, owner_password,
+  method, permissions, encrypt_metadata))` writes encrypted files:
+  AES-256 (revision 6, the default), AES-128 or RC4 128-bit. Output
+  is still unencrypted by default. AES needs the `crypto` extra; without
+  it the error says what to install. qpdf, pypdf, PDFium and pdfrw open
+  the output with the user and the owner password.
 - A damaged encrypted file whose cross-reference data has to be
   rebuilt now reads the objects in its object streams. Before, it had
   no pages.

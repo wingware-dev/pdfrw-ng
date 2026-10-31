@@ -8,6 +8,7 @@ from .objects import (PdfObject, PdfName, PdfArray,
                       PdfDict, IndirectPdfDict, PdfString)
 from .tokens import PdfTokens
 from .errors import PdfParseError, PdfDecryptionError
+from .crypt import Encryption
 from .pagemerge import PageMerge
 
 __version__ = '0.5.0'
@@ -19,5 +20,5 @@ PdfFileWriter = PdfWriter
 
 __all__ = """PdfWriter PdfReader PdfObject PdfName PdfArray
              PdfTokens PdfParseError PdfDecryptionError PdfDict IndirectPdfDict
-             PdfString PageMerge""".split()
+             PdfString PageMerge Encryption""".split()
 
