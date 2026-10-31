@@ -91,6 +91,16 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
 - A damaged encrypted file whose cross-reference data has to be
   rebuilt now reads the objects in its object streams. Before, it had
   no pages.
+- In AES-256 files, `/Perms` is checked against `/P` and
+  `/EncryptMetadata` (Algorithm 13 of PDF 32000-2). A mismatch means
+  the permissions may have been altered: it is logged as a warning and
+  the file is still read. `reader.crypt_handler.perms_ok` gives the
+  result.
+- AES-256 passwords are prepared with SASLprep (RFC 4013) before
+  they are hashed, as the spec requires, so a password typed in
+  another Unicode form, such as with decomposed accents, still opens
+  the file. The password as given is also tried, for writers that skip
+  SASLprep.
 
 ### Writer and objects
 

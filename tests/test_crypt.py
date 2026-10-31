@@ -373,3 +373,131 @@ def test_upstream_helpers(monkeypatch, R):
     assert crypt.check_user_password(key, doc)
     assert not crypt.check_user_password(b'x' * len(key), doc)
     assert len(crypt.create_user_hash(key, doc)) == (32 if R == 2 else 16)
+
+
+# -- /Perms (Algorithm 13) -------------------------------------------------
+
+def _perms_dict(P=-1028, metadata=b'T', tag=b'adb', key=b'k' * 32,
+                perms=None):
+    from Crypto.Cipher import AES
+    if perms is None:
+        block = ((P & 0xFFFFFFFF).to_bytes(4, 'little') + b'\xff' * 4 +
+                 metadata + tag + b'rand')
+        perms = AES.new(key, AES.MODE_ECB).encrypt(block)
+    return PdfDict(P=P, Perms=PdfString.from_bytes(perms))
+
+
+def test_aes256_perms_checked(caplog):
+    """A file qpdf wrote has /Perms that matches /P: no warning."""
+    pytest.importorskip('Crypto')
+    data = encrypt(source_pdf(), R=6, aes=True)
+    reader = PdfReader(fdata=data)
+    assert reader.crypt_handler.perms_ok is True
+    assert 'Perms' not in caplog.text
+
+
+def test_aes256_tampered_p_warns_but_reads(caplog):
+    """Changing /P without updating /Perms is reported, and the file
+    is still read: only software enforcing permissions cares."""
+    pytest.importorskip('Crypto')
+    data = encrypt(source_pdf(), R=6, aes=True)
+    assert data.count(b'/P -1028') == 1
+    data = data.replace(b'/P -1028', b'/P -1029')
+    reader = PdfReader(fdata=data)
+    assert reader.crypt_handler.perms_ok is False
+    assert '/P is -1029 but /Perms says -1028' in caplog.text
+    check_copy(copy(reader), data)
+
+
+def test_check_perms_cases(caplog):
+    pytest.importorskip('Crypto')
+    key = b'k' * 32
+    check = crypt._check_perms
+    assert check(key, _perms_dict(), 6, True)
+    assert check(key, _perms_dict(metadata=b'F'), 6, False)
+    assert caplog.text == ''
+
+    assert not check(key, _perms_dict(metadata=b'F'), 6, True)
+    assert '/EncryptMetadata is true but /Perms says false' in caplog.text
+    caplog.clear()
+
+    assert not check(key, _perms_dict(tag=b'xyz'), 6, True)
+    assert 'valid permissions block' in caplog.text
+    caplog.clear()
+
+    assert not check(b'K' * 32, _perms_dict(), 6, True)  # wrong key
+    assert 'valid permissions block' in caplog.text
+    caplog.clear()
+
+    assert not check(key, PdfDict(P=-4), 6, True)
+    assert 'missing or too short' in caplog.text
+    caplog.clear()
+
+    # Revision 5 files may lack /Perms; that is not worth a warning.
+    assert not check(key, PdfDict(P=-4), 5, True)
+    assert caplog.text == ''
+
+
+# -- SASLprep for AES-256 passwords ----------------------------------------
+
+@pytest.mark.parametrize('text, expected', [
+    (u'user', u'user'),
+    (u'I­X', u'IX'),                   # RFC 4013 examples
+    (u'ª', u'a'),
+    (u'Ⅸ', u'IX'),
+    (u'été', u'été'),    # NFKC composes accents
+    (u'a b', u'a b'),                  # Non-ASCII space
+    (u'​', u''),                       # Mapped to nothing
+    (u'اب', u'اب'),     # Right-to-left only
+], ids=['ascii', 'soft-hyphen', 'ordinal', 'roman', 'decomposed', 'nbsp',
+        'zwsp', 'rtl'])
+def test_saslprep(text, expected):
+    assert crypt.saslprep(text) == expected
+
+
+@pytest.mark.parametrize('text', [u'a\u0007', u'ا1', u'a'],
+                         ids=['control', 'bidi', 'private-use'])
+def test_saslprep_rejects(text):
+    with pytest.raises(ValueError):
+        crypt.saslprep(text)
+
+
+DECOMPOSED = u'café pa­ss'      # e + combining acute, soft hyphen
+PREPARED = u'café pass'
+
+
+@pytest.mark.parametrize('owner', [False, True], ids=['user', 'owner'])
+def test_aes256_password_is_saslprepped(owner):
+    """A password typed in another Unicode form opens a file whose
+    password was SASLprepped when it was encrypted, as the spec says."""
+    pytest.importorskip('Crypto')
+    kw = {'owner': PREPARED, 'user': 'other'} if owner else \
+        {'user': PREPARED}
+    data = encrypt(source_pdf(), R=6, aes=True, **kw)
+    reader = PdfReader(fdata=data, password=DECOMPOSED)
+    check_copy(copy(reader), data, PREPARED)
+
+
+def test_aes256_password_not_saslprepped_by_writer():
+    """A writer that skipped SASLprep hashed the password as given; that
+    is tried too."""
+    pytest.importorskip('Crypto')
+    data = encrypt(source_pdf(), user=DECOMPOSED, R=6, aes=True)
+    reader = PdfReader(fdata=data, password=DECOMPOSED)
+    check_copy(copy(reader), data, DECOMPOSED)
+
+
+def test_aes256_password_saslprep_prohibited(caplog):
+    """A password SASLprep rejects is used as given, with a warning."""
+    pytest.importorskip('Crypto')
+    password = u'pass\u0007word'
+    data = encrypt(source_pdf(), user=password, R=6, aes=True)
+    check_copy(copy(PdfReader(fdata=data, password=password)), data,
+               password)
+    assert 'not valid for SASLprep' in caplog.text
+
+
+def test_rc4_password_not_saslprepped():
+    """Revisions 2-4 use PDFDocEncoding, not SASLprep."""
+    # SASLprep would make U+00AA 'a'.
+    assert crypt._password_candidates(u'xª', 4) == [b'x\xaa']

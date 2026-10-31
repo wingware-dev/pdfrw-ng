@@ -16,6 +16,8 @@ as the object is read.  All the arithmetic here is on bytes.
 """
 
 import hashlib
+import stringprep
+import unicodedata
 
 try:
     from Crypto.Cipher import AES
@@ -113,21 +115,72 @@ def _int(value, default=0):
         return default
 
 
-def _password_bytes(password, revision):
-    """The password as the security handler hashes it: PDFDocEncoding
-    for revisions 2-4, UTF-8 (at most 127 bytes) for 5 and 6."""
+def saslprep(text):
+    """Prepare `text` with SASLprep (RFC 4013), as revisions 5 and 6
+    require before a password is UTF-8 encoded.
+
+    Treated as a query: unassigned code points are allowed.  Raises
+    ValueError for a prohibited character or bad bidirectional text.
+    """
+    in_c12 = stringprep.in_table_c12
+    in_b1 = stringprep.in_table_b1
+    text = u''.join(u' ' if in_c12(ch) else ch for ch in text
+                    if not in_b1(ch))
+    text = unicodedata.normalize('NFKC', text)
+    if not text:
+        return text
+    prohibited = (stringprep.in_table_c12, stringprep.in_table_c21_c22,
+                  stringprep.in_table_c3, stringprep.in_table_c4,
+                  stringprep.in_table_c5, stringprep.in_table_c6,
+                  stringprep.in_table_c7, stringprep.in_table_c8,
+                  stringprep.in_table_c9)
+    for ch in text:
+        if any(table(ch) for table in prohibited):
+            raise ValueError('prohibited character U+%04X' % ord(ch))
+    if any(stringprep.in_table_d1(ch) for ch in text):
+        if any(stringprep.in_table_d2(ch) for ch in text):
+            raise ValueError('mixes right-to-left and left-to-right text')
+        if not (stringprep.in_table_d1(text[0]) and
+                stringprep.in_table_d1(text[-1])):
+            raise ValueError('right-to-left text must start and end with '
+                             'a right-to-left character')
+    return text
+
+
+def _password_candidates(password, revision):
+    """The byte strings to try as the password, best first.
+
+    Revisions 2-4 hash the password in PDFDocEncoding.  Revisions 5 and
+    6 hash its SASLprep form in UTF-8, at most 127 bytes; the password
+    UTF-8 encoded as given is tried too, since some writers skip
+    SASLprep.  Bytes are used as they are.
+    """
     if password is None:
         password = b''
     if isinstance(password, (bytes, bytearray)):
         data = bytes(password)
-    elif revision >= 5:
-        data = password.encode('utf-8')
-    else:
+        return [data[:127] if revision >= 5 else data]
+    if revision < 5:
         try:
-            data = password.encode('pdfdocencoding')
+            return [password.encode('pdfdocencoding')]
         except UnicodeEncodeError:
-            data = password.encode('utf-8')
-    return data[:127] if revision >= 5 else data
+            return [password.encode('utf-8')]
+    candidates = []
+    try:
+        candidates.append(saslprep(password).encode('utf-8')[:127])
+    except ValueError as exc:
+        log.warning('Password is not valid for SASLprep (%s); using it '
+                    'as given', exc)
+    raw = password.encode('utf-8')[:127]
+    if raw not in candidates:
+        candidates.append(raw)
+    return candidates
+
+
+def _password_bytes(password, revision):
+    """The password as the security handler hashes it (the first of
+    `_password_candidates`)."""
+    return _password_candidates(password, revision)[0]
 
 
 # -- revisions 2 to 4 (RC4 and AES-128) ---------------------------------
@@ -228,6 +281,40 @@ def _file_key_r6(password, encrypt, revision):
         wrapped[:32])
 
 
+def _check_perms(key, encrypt, revision, encrypt_metadata):
+    """Check /Perms against /P and /EncryptMetadata (Algorithm 13).
+
+    Returns True when they match.  Otherwise logs a warning and returns
+    False: the permissions may have been tampered with, which matters
+    only to software that enforces them, so the file is still read.
+    """
+    perms = _bytes(encrypt.Perms)
+    if len(perms) < 16:
+        if revision >= 6 or perms:
+            log.warning('The /Perms entry of /Encrypt is missing or too '
+                        'short; cannot check the permissions in /P')
+        return False
+    plain = AES.new(key, AES.MODE_ECB).decrypt(perms[:16])
+    if plain[9:12] != b'adb':
+        log.warning('The /Perms entry of /Encrypt does not decrypt to a '
+                    'valid permissions block; /P may have been altered')
+        return False
+    problems = []
+    permissions = _int(encrypt.P)
+    if plain[:4] != (permissions & 0xFFFFFFFF).to_bytes(4, 'little'):
+        problems.append('/P is %d but /Perms says %d' % (
+            permissions, int.from_bytes(plain[:4], 'little', signed=True)))
+    if plain[8:9] != (b'T' if encrypt_metadata else b'F'):
+        problems.append('/EncryptMetadata is %s but /Perms says %s' % (
+            str(encrypt_metadata).lower(),
+            'true' if plain[8:9] == b'T' else 'false'))
+    if problems:
+        log.warning('Permissions in /Encrypt do not match /Perms (%s); '
+                    'they may have been altered', '; '.join(problems))
+        return False
+    return True
+
+
 # -- crypt filters -------------------------------------------------------
 
 class IdentityCryptFilter(object):
@@ -291,7 +378,8 @@ class SecurityHandler(object):
 
     Attributes: `key` (the file key), `filters` (crypt filter name to
     filter), `stream_filter` and `string_filter` (the defaults),
-    `encrypt_metadata`.
+    `encrypt_metadata`, and for AES-256 `perms_ok`, whether /Perms
+    matches /P and /EncryptMetadata (a mismatch is logged, not raised).
     """
 
     def __init__(self, encrypt, file_id=None, password=''):
@@ -362,12 +450,15 @@ class SecurityHandler(object):
                 AES is None:
             raise PdfDecryptionError(_NEEDS_PYCRYPTODOME)
 
-        password = _password_bytes(password, revision)
-        if version == 5:
-            key = _file_key_r6(password, encrypt, revision)
-        else:
-            key = self._file_key_r4(password, encrypt, file_id, revision,
-                                    length)
+        key = None
+        for password in _password_candidates(password, revision):
+            if version == 5:
+                key = _file_key_r6(password, encrypt, revision)
+            else:
+                key = self._file_key_r4(password, encrypt, file_id,
+                                        revision, length)
+            if key is not None:
+                break
         if key is None:
             if password:
                 raise PdfDecryptionError(
@@ -377,6 +468,9 @@ class SecurityHandler(object):
                 'This PDF is encrypted and needs a password: '
                 'PdfReader(..., password="...")')
         self.key = key
+        if version == 5:
+            self.perms_ok = _check_perms(key, encrypt, revision,
+                                         self.encrypt_metadata)
 
         for name, method in methods.items():
             filters[name] = (identity if method is None
