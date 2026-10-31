@@ -271,16 +271,35 @@ class PdfDict(dict):
     def copy(self):
         return type(self)(self)
 
-    def pop(self, key):
+    def pop(self, key, *default):
+        ''' Like dict.pop: remove key and return its value, resolving an
+            indirect object.  A missing key (or one whose indirect object
+            resolves to null) returns default if one is given, and raises
+            KeyError if not.
+        '''
+        if len(default) > 1:
+            raise TypeError('pop expected at most 2 arguments, got %d'
+                            % (len(default) + 1))
         value = self.get(key)
-        del self[key]
+        if value is None:
+            if default:
+                return default[0]
+            raise KeyError(key)
+        dict.__delitem__(self, key)
         return value
 
     def popitem(self):
-        key, value = dict.pop(self)
-        if isinstance(value, PdfIndirect):
-            value = value.real_value()
-        return value
+        ''' Like dict.popitem: remove and return a (key, value) pair,
+            resolving an indirect object.  Entries whose indirect object
+            resolves to null are dropped, as if they were never there.
+            Raises KeyError when the dictionary is empty.
+        '''
+        while 1:
+            key, value = dict.popitem(self)
+            if isinstance(value, PdfIndirect):
+                value = value.real_value()
+            if value is not None:
+                return key, value
 
     def inheritable(self):
         ''' Search through ancestors as needed for inheritable

@@ -89,6 +89,58 @@ def test_setdefault_resolves_indirect():
     assert d.setdefault(PdfName.A, 1) == '42'
 
 
+# -- pop() and popitem() behave like dict's ---------------------------------
+
+def indirect(value):
+    ref = PdfIndirect((5, 0))
+    ref.value = value
+    return ref
+
+
+def test_pop():
+    d = PdfDict(A=PdfObject('1'))
+    assert d.pop(PdfName.A) == '1'
+    assert dict(d) == {}
+    with pytest.raises(KeyError):
+        d.pop(PdfName.A)
+    assert d.pop(PdfName.A, 'default') == 'default'
+    assert d.pop(PdfName.A, None) is None
+    with pytest.raises(TypeError):
+        d.pop(PdfName.A, 1, 2)
+
+
+def test_pop_resolves_indirect():
+    d = PdfDict()
+    dict.__setitem__(d, PdfName.A, indirect(PdfObject('42')))
+    assert d.pop(PdfName.A) == '42'
+    assert dict(d) == {}
+
+
+def test_pop_null_indirect_counts_as_missing():
+    d = PdfDict()
+    dict.__setitem__(d, PdfName.A, indirect(None))
+    assert d.pop(PdfName.A, 'default') == 'default'
+    assert dict(d) == {}
+    dict.__setitem__(d, PdfName.A, indirect(None))
+    with pytest.raises(KeyError):
+        d.pop(PdfName.A)
+
+
+def test_popitem():
+    d = PdfDict()
+    dict.__setitem__(d, PdfName.A, indirect(PdfObject('42')))
+    assert d.popitem() == (PdfName.A, '42')
+    with pytest.raises(KeyError):
+        d.popitem()
+
+
+def test_popitem_skips_null_indirect():
+    d = PdfDict(B=PdfObject('2'))
+    dict.__setitem__(d, PdfName.A, indirect(None))   # popped first (LIFO)
+    assert d.popitem() == (PdfName.B, '2')
+    assert dict(d) == {}
+
+
 # -- #141: dunder attributes, copy and pickle ------------------------------
 
 def test_dunder_attributes_are_not_pdf_keys():

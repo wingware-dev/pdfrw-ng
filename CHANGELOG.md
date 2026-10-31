@@ -122,6 +122,10 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
 - A `#` in a name made with `PdfName(...)` is written as `#23`, as the
   spec requires. `PdfName('A#41')` used to be written as `/A#41`, which
   readers decode as `/AA`.
+- `PdfDict.pop` accepts a default, as `dict.pop` does, and
+  `PdfDict.popitem` returns a `(key, value)` pair; it used to raise
+  TypeError on every call. Both resolve indirect objects, and an entry
+  that resolves to null counts as missing.
 
 ### PageMerge, findobjs and logging
 
