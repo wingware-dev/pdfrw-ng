@@ -225,8 +225,8 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   that needed the external static_pdfs corpus: `test_examples`,
   `test_roundtrip`, the `expected` files, `checkdiffs`,
   `update_expected`, `myprofile` and the notebook.
-- The suite has 408 tests and covers 86% of `pdfrw/` with branch
-  coverage (88% of lines), up from 28% of lines with upstream's offline
+- The suite has 483 tests and covers 87% of `pdfrw/` with branch
+  coverage (90% of lines), up from 28% of lines with upstream's offline
   tests ([coverage by module](docs/shots/coverage.png)). CI fails below
   85% branch coverage.
 - Replaced the PngSuite `.png.log` vectors with generated PNG-predictor

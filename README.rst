@@ -90,8 +90,8 @@ show what a viewer shows.  ``tools/shots.py`` regenerates them.
 * `str key in a PdfDict`__: the error comes when the key is set, and
   an existing file is not truncated (#135).
 * `Carriage return in a string`__: it survives a copy (#147).
-* `Test coverage`__ of ``pdfrw/`` by module: 28% upstream, 88%
-  (86% with branch coverage) in pdfrw-ng.
+* `Test coverage`__ of ``pdfrw/`` by module: 28% upstream, 90%
+  (87% with branch coverage) in pdfrw-ng.
 
 __ docs/shots/dangling-kids.png
 __ docs/shots/stale-page-tree.png
