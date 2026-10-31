@@ -72,6 +72,35 @@ fixes.
 
 __ CHANGELOG.md
 
+Before and after
+----------------
+
+These pictures compare upstream pdfrw 0.4 with pdfrw-ng on the same
+generated input.  Pages are rendered with PDFium, not pdfrw, so they
+show what a viewer shows.  ``tools/shots.py`` regenerates them.
+
+* `Dangling page-tree reference`__: one bad ``/Kids`` entry no longer
+  loses every page.
+* `Incremental update`__: the current page tree is read, not a stale
+  one from an older revision (#121).
+* `Encrypted file`__: a copy is decrypted instead of having blank
+  pages (#116).
+* `Booklet padding`__: ``booklet.py -p`` puts each page on the right
+  half sheet.
+* `str key in a PdfDict`__: the error comes when the key is set, and
+  an existing file is not truncated (#135).
+* `Carriage return in a string`__: it survives a copy (#147).
+* `Test coverage`__ of ``pdfrw/`` by module: 28% upstream, 88%
+  (86% with branch coverage) in pdfrw-ng.
+
+__ docs/shots/dangling-kids.png
+__ docs/shots/stale-page-tree.png
+__ docs/shots/encrypted-copy.png
+__ docs/shots/booklet-padding.png
+__ docs/shots/str-key-write.png
+__ docs/shots/cr-in-strings.png
+__ docs/shots/coverage.png
+
 About the name
 --------------
 
@@ -441,15 +470,23 @@ Missing features
 Even as a pure PDF container library, pdfrw comes up a bit short. It
 does not currently support:
 
--  Most compression/decompression filters
+-  Decompression filters other than ``/FlateDecode`` (with or without
+   PNG predictors).  Streams that use other filters, such as
+   ``/LZWDecode`` or ``/ASCII85Decode``, are copied as they are but
+   cannot be uncompressed.
 -  Encryption other than the standard (password) security handler,
-   such as certificate encryption; see `CHANGELOG.md`__ for what this
-   fork has added
+   such as certificate encryption.  The standard handler is supported
+   with RC4 (40 to 128 bit), AES-128 and AES-256 (revisions 2 to 6);
+   AES needs the ``crypto`` extra.
+-  Writing encrypted files.  A copy written from an encrypted file is
+   not encrypted.
+
+`CHANGELOG.md`__ lists what this fork has added.
 
 __ CHANGELOG.md
 
 `pdftk`__ is a wonderful command-line
-tool that can convert your PDFs to remove encryption and compression.
+tool that can convert your PDFs to remove other encryption and compression.
 However, in most cases, you can do a lot of useful work with PDFs
 without actually removing compression, because only certain elements
 inside PDFs are actually compressed.
@@ -627,6 +664,19 @@ An instance of the PdfReader class is an instance of a PdfDict -- the
 trailer dictionary of the PDF file, to be exact.  It will have a private
 attribute set on it that is named 'pages' that is a list containing all
 the pages in the file.
+
+PdfReader reads files that have been updated incrementally, including
+hybrid-reference files and files whose cross-reference data is in
+streams: it merges every cross-reference section, newest first, so it
+sees the current version of each object.  It also reads damaged files
+instead of raising.  When the cross-reference data cannot be used, it
+rebuilds it by scanning the file for objects, and it tolerates a
+missing ``%%EOF``, junk before the ``%PDF-`` header, bad stream
+lengths and objects cut off by the end of the file.  A page tree with
+a dangling or malformed node loses only that node, with a warning,
+and the tree is repaired so that a copy shows the same pages.
+Problems that pdfrw works around are logged to the ``pdfrw`` logger,
+which has only a ``NullHandler``: configure logging to see them.
 
 When instantiating a PdfReader object, there are options available
 for decompressing all the objects in the file.  pdfrw does not currently

@@ -6,9 +6,11 @@ The code was imported, without its git history, from
 that were never released (#113 PNG Paeth/Avg filters, #228).
 
 Upstream issue numbers (#NNN) refer to
-https://github.com/pmaupin/pdfrw/issues. Each fix cites its issue, and
-each has a regression test that builds its own PDF and checks the
-result with independent tools (qpdf via pikepdf, pypdf, PDFium).
+https://github.com/pmaupin/pdfrw/issues. Each fix that has an upstream
+issue cites it, and each fix has a regression test that builds its own
+PDF and checks the result with independent tools (qpdf via pikepdf,
+pypdf, PDFium). Before/after screenshots of the main visible fixes are
+in [docs/shots/](docs/shots/).
 
 ## 0.5.0 (unreleased)
 
@@ -21,6 +23,7 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   sections were merged, so an old member overrode its newer version.
   All xref sections are now merged, newest first, before any object
   stream is read (#121, #177, #188, #223, #237, #181).
+  [Screenshot](docs/shots/stale-page-tree.png).
 - Hybrid-reference files are read: the `/XRefStm` stream a table
   trailer points to is followed. Before, objects listed only there
   were missing, often leaving 0 pages.
@@ -42,7 +45,7 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   as `/Pages`, and a kid with neither as `/Page`. Leaves with any other
   `/Type` are skipped, and so is a `/Pages` node that loops back to its
   own ancestor. The tree is repaired to match, so written copies show
-  the same pages.
+  the same pages. [Screenshot](docs/shots/dangling-kids.png).
 - Damaged files are read instead of raising. When the cross-reference
   data cannot be used, it is rebuilt by scanning the file for objects,
   trailers and object streams, and the catalog is found by its /Type
@@ -78,6 +81,7 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   unsupported security handler, raises the new `PdfDecryptionError`
   (a `PdfParseError`) instead of returning ciphertext. `decrypt=True`
   now only reads every object up front.
+  [Screenshot](docs/shots/encrypted-copy.png).
 - Strings are decrypted as well as streams (#123). Cross-reference
   streams, signature `/Contents`, and the XMP metadata stream when
   `/EncryptMetadata` is false are left as stored. A stream's own
@@ -102,11 +106,13 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   written as `null`.
 - Carriage returns in literal strings are escaped as `\r`. Readers
   turned a bare CR or CRLF into LF (#147).
+  [Screenshot](docs/shots/cr-in-strings.png).
 - `PdfDict.update` and `PdfDict.setdefault` check that every key is a
   PdfName, as item assignment does, and raise `PdfParseError` before
   changing anything. A str key used to fail only when the file was
   written (#135). `update` treats keyword arguments as the constructor
   does, and a value of None deletes the key.
+  [Screenshot](docs/shots/str-key-write.png).
 - `copy.copy`, `copy.deepcopy` and pickle work for `PdfDict`,
   `PdfArray`, `PdfName` and `PdfIndirect`, including pages read from a
   file, without copying the `PdfReader`. Attribute lookups of Python
@@ -158,6 +164,7 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   exists.
 - `booklet.py` no longer crashes on a 1-page file. With `-p`, a blank
   half sheet no longer moves the page beside it to the wrong half.
+  [Screenshot](docs/shots/booklet-padding.png).
 - `subset.py` and `rotate.py` refuse page 0 and out-of-range pages;
   page 0 used to select the last page. Descending ranges such as `5-3`
   now work.
@@ -190,6 +197,10 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   that needed the external static_pdfs corpus: `test_examples`,
   `test_roundtrip`, the `expected` files, `checkdiffs`,
   `update_expected`, `myprofile` and the notebook.
+- The suite has 408 tests and covers 86% of `pdfrw/` with branch
+  coverage (88% of lines), up from 28% of lines with upstream's offline
+  tests ([coverage by module](docs/shots/coverage.png)). CI fails below
+  85% branch coverage.
 - Replaced the PngSuite `.png.log` vectors with generated PNG-predictor
   round trips. The flate PNG test no longer writes `.pickle` files into
   `tests/`.
@@ -200,6 +211,10 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   source (it is not on PyPI), uninstalling `pdfrw`/`pdfrw2` first,
   supported Python versions, running the offline tests, and credits for
   Patrick Maupin and the other original authors. Fixed the dead
-  reportlab link (#225).
+  reportlab link (#225). Its "Missing features" and "File reading"
+  sections now say what works: FlateDecode is the only decompression
+  filter, the standard security handler is read with RC4, AES-128 and
+  AES-256, and damaged and incrementally updated files are read. A
+  "Before and after" section links the screenshots in docs/shots/.
 - Listed every author named in LICENSE.txt in the `pyproject.toml`
   `authors`.
