@@ -12,7 +12,9 @@ of the object.
 '''
 import gc
 import binascii
+import bisect
 import itertools
+import re
 
 from .errors import PdfParseError, log
 from .tokens import PdfTokens
@@ -112,9 +114,9 @@ class PdfReader(PdfDict):
 
         fdata = source.fdata
         startstream = source.tokstart + len(tok)
-        gotcr = fdata[startstream] == '\r'
+        gotcr = fdata[startstream:startstream + 1] == '\r'
         startstream += gotcr
-        gotlf = fdata[startstream] == '\n'
+        gotlf = fdata[startstream:startstream + 1] == '\n'
         startstream += gotlf
         if not gotlf:
             if not gotcr:
@@ -127,7 +129,35 @@ class PdfReader(PdfDict):
     def readstream(self, obj, startstream, source, exact_required=False,
                    streamending='endstream endobj'.split(), int=int):
         fdata = source.fdata
-        length = int(obj.Length)
+        maxstream = len(fdata)
+        try:
+            length = int(obj.Length)
+        except (TypeError, ValueError):
+            length = None
+        if length is None or length < 0 or startstream + length > maxstream:
+            # A missing or unusable /Length, or one that runs past the
+            # end of the file (#199): find the stream's end instead.
+            if exact_required:
+                source.exception('Invalid stream /Length %r', obj.Length)
+            source.error('stream /Length %s is invalid or runs past the '
+                         'end of the file -- searching for endstream',
+                         obj.Length)
+            endstream = fdata.find('endstream', startstream)
+            if endstream < 0:
+                source.error('Could not find endstream')
+                obj.stream = fdata[startstream:]
+                source.floc = maxstream
+                return
+            end = endstream
+            if fdata[end - 1:end] == '\n':
+                end -= 1
+            if fdata[end - 1:end] == '\r':
+                end -= 1
+            obj.stream = fdata[startstream:end]
+            source.floc = endstream + len('endstream')
+            if source.next_default() != 'endobj':
+                source.error('Expected endobj after endstream')
+            return
         source.floc = target_endstream = startstream + length
         endit = source.multiple(2)
         obj._stream = fdata[startstream:target_endstream]
@@ -139,10 +169,6 @@ class PdfReader(PdfDict):
 
         # The length attribute does not match the distance between the
         # stream and endstream keywords.
-
-        # TODO:  Extract maxstream from dictionary of object offsets
-        # and use rfind instead of find.
-        maxstream = len(fdata) - 20
         endstream = fdata.find('endstream', startstream, maxstream)
         source.floc = startstream
         room = endstream - startstream
@@ -176,8 +202,23 @@ class PdfReader(PdfDict):
             return
         source.error('Illegal endstream/endobj combination')
 
-    def loadindirect(self, key, PdfDict=PdfDict,
-                     isinstance=isinstance):
+    def loadindirect(self, key):
+        ''' Load indirect object `key`, a (number, generation) pair.
+
+            An object that cannot be parsed, such as one cut off by the
+            end of the file (#145), logs an error and reads as None (or
+            as far as it was parsed), instead of failing the whole read.
+        '''
+        try:
+            return self._loadindirect(key)
+        except (PdfParseError, StopIteration) as exc:
+            log.error('Could not read PDF object %d %d: %s', key[0], key[1],
+                      exc or 'unexpected end of file')
+            self.deferred_objects.discard(key)
+            result = self.indirect_objects.get(key)
+            return None if isinstance(result, PdfIndirect) else result
+
+    def _loadindirect(self, key, PdfDict=PdfDict, isinstance=isinstance):
         result = self.indirect_objects.get(key)
         if not isinstance(result, PdfIndirect):
             return result
@@ -289,7 +330,9 @@ class PdfReader(PdfDict):
         '''
         for num in sorted(object_streams):
             members = object_streams[num]
-            obj = self.findindirect(num, 0).real_value()
+            obj = self.findindirect(num, 0)
+            if isinstance(obj, PdfIndirect):
+                obj = obj.real_value()
             if not isinstance(obj, PdfDict) or obj.Type != PdfName.ObjStm:
                 log.warning('Object %d is not an object stream; cannot '
                             'load objects %s from it', num,
@@ -309,13 +352,17 @@ class PdfReader(PdfDict):
             objsource = PdfTokens(obj.stream, 0, False)
             next = objsource.next
             header = {}
-            firstoffset = int(obj.First)
-            count = int(obj.N) if obj.N is not None else firstoffset
-            for _ in range(count):
-                if objsource.floc >= firstoffset:
-                    break
-                member = int(next())
-                header.setdefault(member, firstoffset + int(next()))
+            try:
+                firstoffset = int(obj.First)
+                count = int(obj.N) if obj.N is not None else firstoffset
+                for _ in range(count):
+                    if objsource.floc >= firstoffset:
+                        break
+                    member = int(next())
+                    header.setdefault(member, firstoffset + int(next()))
+            except (TypeError, ValueError, StopIteration):
+                log.warning('Damaged header in object stream %d; read %d '
+                            'of its objects', num, len(header))
             for objnum, index in members:
                 offset = header.get(objnum)
                 if offset is None:
@@ -325,10 +372,16 @@ class PdfReader(PdfDict):
                 # Read the object, and call special code if it starts
                 # an array or dictionary
                 objsource.floc = offset
-                sobj = next()
-                func = self.special.get(sobj)
-                if func is not None:
-                    sobj = func(objsource)
+                try:
+                    sobj = next()
+                    func = self.special.get(sobj)
+                    if func is not None:
+                        sobj = func(objsource)
+                except (PdfParseError, StopIteration) as exc:
+                    log.error('Could not read object %d from object '
+                              'stream %d: %s', objnum, num,
+                              exc or 'unexpected end of stream')
+                    continue
 
                 key = (objnum, 0)
                 self.indirect_objects[key] = sobj
@@ -337,20 +390,31 @@ class PdfReader(PdfDict):
                 # Mark the object as indirect
                 sobj.indirect = key
 
+    _startxref = re.compile(r'startxref[\x00\t\n\f\r ]*([0-9]+)')
+
     def findxref(self, fdata):
-        ''' Find the cross reference section at the end of a file
+        ''' Find the cross reference section at the end of a file.
+
+            Uses the last ``startxref`` followed by a number, even one
+            glued to it (#211).  Raises PdfParseError when there is none
+            or the number is not an offset in the file (#210), so the
+            caller can reconstruct the cross-reference data instead.
         '''
-        startloc = fdata.rfind('startxref')
-        if startloc < 0:
-            raise PdfParseError('Did not find "startxref" at end of file')
-        source = PdfTokens(fdata, startloc, False, self.verbose)
-        tok = source.next()
-        assert tok == 'startxref'  # (We just checked this...)
-        tableloc = source.next_default()
-        if not tableloc.isdigit():
-            source.exception('Expected table location')
-        if source.next_default().rstrip().lstrip('%') != 'EOF':
-            source.exception('Expected %%EOF')
+        end = len(fdata)
+        while 1:
+            startloc = fdata.rfind('startxref', 0, end)
+            if startloc < 0:
+                raise PdfParseError('Did not find "startxref" followed by '
+                                    'a table location')
+            match = self._startxref.match(fdata, startloc)
+            if match is not None:
+                break
+            end = startloc
+        tableloc = match.group(1)
+        if len(tableloc) > 20 or int(tableloc) >= startloc:
+            raise PdfParseError('startxref location %s is not in the file '
+                                '(%d bytes before it)'
+                                % (tableloc[:30], startloc))
         return startloc, PdfTokens(fdata, int(tableloc), True, self.verbose)
 
     def parse_xref_stream(self, source, entries=None, int=int, range=range,
@@ -503,7 +567,7 @@ class PdfReader(PdfDict):
         'Prev', 'XRefStm', 'Type', 'W', 'Index', 'Length', 'Filter',
         'DecodeParms', 'F', 'FFilter', 'FDecodeParms', 'DL'))
 
-    def read_xref_sections(self, source):
+    def read_xref_sections(self, source, damaged=False):
         ''' Read every cross-reference section, newest first.
 
             Starts at `source`'s position (the newest section) and
@@ -520,11 +584,18 @@ class PdfReader(PdfDict):
             ``(objnum, index)`` pairs that live in it; `trailer` is a
             PdfDict of the document's trailer entries, each from the
             newest trailer that has it.
+
+            When a section cannot be read, or a /Prev is not an offset in
+            the file, or `damaged` is true (no usable startxref), the file
+            is also scanned for ``N G obj`` headers and trailers, and what
+            the scan finds fills in, at the lowest priority, whatever the
+            readable sections do not list (#168, #210).
         '''
         merged = {}
         trailers = []
         seen = set()
-        while 1:
+        fdata = source.fdata
+        while not damaged:
             loc = source.floc
             if loc in seen:
                 source.warning('Cross-reference sections loop back to '
@@ -533,7 +604,15 @@ class PdfReader(PdfDict):
             seen.add(loc)
             source.obj_offsets = {}
             entries = {}
-            trailer, is_stream = self.parsexref(source, entries)
+            try:
+                trailer, is_stream = self.parsexref(source, entries)
+            except (PdfParseError, StopIteration) as exc:
+                log.warning('Cannot read the cross-reference section at '
+                            'offset %d (%s); reconstructing it from the '
+                            'objects in the file', loc,
+                            exc or 'unexpected end of file')
+                damaged = True
+                break
             prev = trailer.Prev
             if prev is None and not trailers:
                 token = source.next_default()
@@ -551,7 +630,29 @@ class PdfReader(PdfDict):
             trailers.append(trailer)
             if prev is None:
                 break
-            source.floc = int(prev)
+            try:
+                prev = int(prev) if len(prev) <= 20 else -1
+            except (TypeError, ValueError):
+                prev = -1
+            if not 0 < prev < len(fdata):
+                log.warning('/Prev %s is not an offset in the file; '
+                            'reconstructing the older cross-reference '
+                            'sections from the objects in the file',
+                            str(trailer.Prev)[:30])
+                damaged = True
+                break
+            source.floc = prev
+
+        scan = None
+        if damaged:
+            scan = self._scan_objects(source)
+            source.obj_offsets = scan.offsets
+            for objnum, entry in iteritems(scan.entries):
+                merged.setdefault(objnum, entry)
+            trailers.extend(scan.trailers)
+            if not any(PdfName.Encrypt in t for t in trailers):
+                for objnum, entry in self._scan_object_streams(scan):
+                    merged.setdefault(objnum, entry)
 
         offsets = {}
         object_streams = {}
@@ -570,7 +671,113 @@ class PdfReader(PdfDict):
             for key, value in dict.items(trailer):
                 if key not in skip and value is not None:
                     result[key] = value
+
+        if PdfName.Root not in result:
+            if scan is None:
+                scan = self._scan_objects(source)
+            if scan.catalogs:
+                num, gen = scan.catalogs[-1]
+                log.warning('No /Root in the trailer; using the catalog, '
+                            'object %d %d', num, gen)
+                result.Root = self.findindirect(num, gen)
         return offsets, object_streams, result
+
+    # Patterns for scanning a damaged file.  `fdata` is a latin-1 str.
+    _ws = r'[\x00\t\n\f\r ]'
+    _end_of_token = r'(?=[\x00\t\n\f\r ()<>\[\]{}/%]|$)'
+    _objheader = re.compile(r'(?<![0-9])([0-9]{1,10})%s+([0-9]{1,5})%s+obj%s'
+                            % (_ws, _ws, _end_of_token))
+    _trailer_start = re.compile(r'trailer%s*<<' % _ws)
+    _scan_types = re.compile(r'/Type%s*/(Catalog|ObjStm|XRef)%s'
+                             % (_ws, _end_of_token))
+
+    class _Scan(object):
+        ''' What `_scan_objects` found. '''
+
+    def _scan_objects(self, source):
+        ''' Reconstruct cross-reference data by scanning the whole file.
+
+            Returns a `_Scan` with: `entries`, xref rows (see
+            `parse_xref_stream`) for each ``N G obj`` header, the last
+            one in the file winning for each number; `offsets`, the same
+            as ``(num, gen) -> offset``; `trailers`, the dictionaries
+            after each ``trailer`` keyword and of each xref stream, newest
+            first; `catalogs` and `objstms`, the ``(num, gen)`` of
+            objects with that /Type, in file order.
+        '''
+        fdata = source.fdata
+        scan = self._Scan()
+        entries = scan.entries = {}
+        headers = []
+        for match in self._objheader.finditer(fdata):
+            num, gen = int(match.group(1)), int(match.group(2))
+            entries[num] = (1, match.start(), gen)
+            headers.append((match.start(), num, gen))
+        scan.offsets = dict(((num, gen), offset)
+                            for num, (_, offset, gen) in iteritems(entries))
+        log.warning('Reconstructed cross-reference data: found %d objects',
+                    len(entries))
+
+        # Which object each /Type belongs to: the nearest header before
+        # it, if that is the copy of the object in use.
+        positions = [header[0] for header in headers]
+        typed = {'Catalog': [], 'ObjStm': [], 'XRef': []}
+        for match in self._scan_types.finditer(fdata):
+            index = bisect.bisect_right(positions, match.start()) - 1
+            if index < 0:
+                continue
+            offset, num, gen = headers[index]
+            found = typed[match.group(1)]
+            if entries[num] == (1, offset, gen) and (num, gen) not in found:
+                found.append((num, gen))
+        scan.catalogs = typed['Catalog']
+        scan.objstms = typed['ObjStm']
+
+        # Trailer dictionaries, from trailer keywords and xref streams.
+        found = []
+        floc = source.floc
+        starts = [match.end() for match in
+                  self._trailer_start.finditer(fdata)]
+        for num, gen in typed['XRef']:
+            source.floc = entries[num][1]
+            if source.multiple(4)[2:] == ['obj', '<<']:
+                starts.append(source.floc)
+        for start in starts:
+            source.floc = start
+            try:
+                found.append((start, self.readdict(source)))
+            except (PdfParseError, StopIteration):
+                continue
+        source.floc = floc
+        found.sort(key=lambda item: item[0], reverse=True)
+        scan.trailers = [trailer for _, trailer in found]
+        return scan
+
+    def _scan_object_streams(self, scan):
+        ''' Yield ``(objnum, (2, objstm_num, index))`` for each member
+            of each object stream the scan found.
+        '''
+        for num, gen in scan.objstms:
+            obj = self.findindirect(num, gen)
+            if isinstance(obj, PdfIndirect):
+                obj = obj.real_value()
+            if not isinstance(obj, PdfDict) or obj.First is None:
+                continue
+            copy = PdfDict(obj)
+            if not uncompress([copy]):
+                continue
+            objsource = PdfTokens(copy.stream, 0, False)
+            try:
+                first = int(copy.First)
+                index = 0
+                while objsource.floc < first:
+                    member = int(objsource.next())
+                    objsource.next()
+                    yield member, (2, num, index)
+                    index += 1
+            except (ValueError, TypeError, StopIteration):
+                log.warning('Cannot read the header of object stream %d',
+                            num)
 
     def _read_xref_stm(self, source, location, entries):
         ''' Add the entries of a hybrid file's /XRefStm stream to
@@ -583,8 +790,9 @@ class PdfReader(PdfDict):
             trailer, is_stream = self.parsexref(source, stm_entries)
             if not is_stream:
                 source.exception('Expected an xref stream')
-        except (PdfParseError, ValueError) as exc:
-            source.warning('Ignoring /XRefStm at %s: %s', location, exc)
+        except (PdfParseError, ValueError, StopIteration) as exc:
+            source.warning('Ignoring /XRefStm at %s: %s', location,
+                           exc or 'unexpected end of file')
             return
         finally:
             source.floc = floc
@@ -779,7 +987,13 @@ class PdfReader(PdfDict):
             if not fdata.startswith('%PDF-'):
                 startloc = fdata.find('%PDF-')
                 if startloc >= 0:
-                    log.warning('PDF header not at beginning of file')
+                    # Offsets in the file count from the header, as the
+                    # file was written before the junk was prepended
+                    # (#242).  If they count from the true start, the
+                    # xref fails to parse and is reconstructed.
+                    log.warning('PDF header not at beginning of file; '
+                                'ignoring the %d bytes before it', startloc)
+                    fdata = fdata[startloc:]
                 else:
                     lines = fdata.lstrip().splitlines()
                     if not lines:
@@ -791,13 +1005,15 @@ class PdfReader(PdfDict):
 
             endloc = fdata.rfind('%EOF')
             if endloc < 0:
-                raise PdfParseError('EOF mark not found: %s' %
-                                    repr(fdata[-20:]))
-            endloc += 6
-            junk = fdata[endloc:]
-            fdata = fdata[:endloc]
-            if junk.rstrip('\00').strip():
-                log.warning('Extra data at end of file')
+                # Truncated, or the writer left it out (#168).
+                log.warning('EOF mark not found: %s', repr(fdata[-20:]))
+            else:
+                endloc += 6
+                junk = fdata[endloc:]
+                fdata = fdata[:endloc]
+                # Trailing NULs are padding, not junk (#136).
+                if junk.rstrip('\00').strip():
+                    log.warning('Extra data at end of file')
 
             private = self.private
             private.indirect_objects = {}
@@ -809,14 +1025,21 @@ class PdfReader(PdfDict):
             for tok in r'\ ( ) < > { } ] >> %'.split():
                 self.special[tok] = self.badtoken
 
-            startloc, source = self.findxref(fdata)
+            try:
+                startloc, source = self.findxref(fdata)
+                damaged = False
+            except PdfParseError as exc:
+                log.warning('%s; reconstructing the cross-reference data '
+                            'from the objects in the file', exc)
+                source = PdfTokens(fdata, 0, True, self.verbose)
+                damaged = True
             private.source = source
 
             # Merge every xref section, newest first, before loading
             # any object, so that each object comes from the newest
             # revision that lists it (#121, #177, #188, #223, #237, #181).
             offsets, object_streams, trailer = self.read_xref_sections(
-                source)
+                source, damaged)
             source.obj_offsets = offsets
 
             # Handle document encryption, from the newest trailer (#179),

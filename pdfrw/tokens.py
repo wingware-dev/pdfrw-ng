@@ -81,7 +81,9 @@ class PdfTokens(object):
             We could use re.search instead of re.finditer, but that's slower.
         '''
         fdata = self.fdata
-        current = self.current = [(startloc, startloc)]
+        # Use the position set by __init__ or a later seek (floc), so a
+        # seek made before the first token is not lost.
+        current = self.current
         cache = {}
         get_cache = cache.get
         while 1:
@@ -148,24 +150,36 @@ class PdfTokens(object):
                 if current[0] is not tokspan:
                     break
             else:
-                if self.strip_comments:
-                    break
-                raise StopIteration
+                # End of data.  (A generator must return here: since
+                # PEP 479, raising StopIteration becomes RuntimeError.)
+                # setstart starts a new generator after this one ends.
+                self.at_end = True
+                return
 
     def __init__(self, fdata, startloc=0, strip_comments=True, verbose=True):
         self.fdata = fdata
         self.strip_comments = strip_comments
-        self.iterator = iterator = self._gettoks(startloc)
         self.msgs_dumped = None if verbose else set()
-        self.next = getattr(iterator, nextattr)
         self.current = [(startloc, startloc)]
+        self._start_iterator()
+
+    def _start_iterator(self):
+        self.at_end = False
+        self.iterator = iterator = self._gettoks(self.current[0][1])
+        self.next = getattr(iterator, nextattr)
 
     def setstart(self, startloc):
         ''' Change the starting location.
+
+            After the end of the data, the token generator has finished,
+            so a seek starts a new one.  (Callers holding the old
+            ``next`` must fetch it again.)
         '''
         current = self.current
         if startloc != current[0][1]:
             current[0] = startloc, startloc
+        if self.at_end:
+            self._start_iterator()
 
     def floc(self):
         ''' Return the current file position

@@ -43,6 +43,23 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   `/Type` are skipped, and so is a `/Pages` node that loops back to its
   own ancestor. The tree is repaired to match, so written copies show
   the same pages.
+- Damaged files are read instead of raising. When the cross-reference
+  data cannot be used, it is rebuilt by scanning the file for objects,
+  trailers and object streams, and the catalog is found by its /Type
+  if no trailer names it. Specifically:
+  - A missing `%%EOF` is a warning, not fatal (#168). NUL padding
+    after it is accepted (#136).
+  - Junk before the `%PDF-` header is skipped, and offsets count from
+    the header (#242).
+  - `startxref` glued to its number no longer trips an assert (#211).
+    A huge or out-of-range `startxref` no longer raises
+    OverflowError (#210), and a bad `/Prev` no longer raises either.
+  - An object cut off by the end of the file is logged and reads as
+    null, instead of failing the whole read (#145).
+  - A stream `/Length` past the end of the file, negative,
+    non-numeric or missing ends the stream at `endstream` (#199).
+  - The tokenizer no longer raises RuntimeError at the end of data
+    on Python 3.7+ (it used `raise StopIteration` in a generator).
 
 ### Encryption
 
