@@ -3,6 +3,8 @@
 
 """find_objects and page_per_xobj (pdfrw/findobjs.py)."""
 
+import pytest
+
 from pdfrw import PdfDict, PdfName
 from pdfrw.findobjs import find_objects, page_per_xobj
 
@@ -46,3 +48,25 @@ def test_image_only_keeps_images():
 def test_without_image_only_wraps_both():
     pages = list(page_per_xobj([page_with(Im1=image(), Fm1=form())]))
     assert len(pages) == 2
+
+
+def mediabox(page):
+    return [float(v) for v in page.MediaBox]
+
+
+def test_scalar_margin_applies_to_every_side():
+    scalar, = page_per_xobj([page_with(Im1=image())], margin=36)
+    sides, = page_per_xobj([page_with(Im1=image())], margin=[36] * 4)
+    assert mediabox(scalar) == mediabox(sides)
+
+
+def test_margin_does_not_swallow_keyboard_interrupt():
+    # Only a non-iterable margin (TypeError) means "one number"; a
+    # bare except used to take Ctrl-C for that too.
+    class Interrupting(object):
+        def __iter__(self):
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        list(page_per_xobj([page_with(Im1=image())],
+                           margin=Interrupting()))

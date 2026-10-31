@@ -183,6 +183,8 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   `0.5,0.5,0.5,0.5` for the bottom-right quarter of the page, is read as
   fractions, as documented. Before, it was read as points and gave a
   box half a point wide.
+- `page_per_xobj` no longer swallows KeyboardInterrupt or SystemExit
+  raised while it checks its `margin` argument.
 
 ### Examples
 

@@ -124,7 +124,7 @@ def page_per_xobj(xobj_iter, width=8.5 * 72, margin=0.0 * 72,
     '''
     try:
         iter(margin)
-    except:
+    except TypeError:       # a single number: the same on every side
         margin = [margin]
     while len(margin) < 4:
         margin *= 2
