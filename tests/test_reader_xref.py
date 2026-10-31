@@ -279,8 +279,6 @@ def test_encrypt_from_newest_trailer(monkeypatch):
     assert seen[0].Filter == '/Standard'
 
 
-@pytest.mark.xfail(strict=True, reason='crypt.py is not ported to Python 3 '
-                   'yet (#48); remove when it is')
 @pytest.mark.parametrize('object_streams', [False, True])
 def test_encrypted_linearized_decrypts(object_streams):
     pytest.importorskip('Crypto')

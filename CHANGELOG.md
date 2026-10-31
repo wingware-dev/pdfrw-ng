@@ -63,6 +63,31 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
 
 ### Encryption
 
+- Encrypted files are read on Python 3. `pdfrw.crypt` was written for
+  Python 2 strings, and `decrypt=True` raised TypeError for RC4 and
+  AES-128 (#48). Supported: RC4 40 to 128 bit (built in, so no extra
+  package is needed), AES-128, and AES-256 (revisions 5 and 6, new).
+  AES needs the `crypto` extra (pycryptodome); without it the error
+  says what to install.
+- Encrypted files are always decrypted as they are read, not only with
+  `decrypt=True`. Before, reading one without it kept the ciphertext:
+  a copy had blank pages and gave no warning, and files with object
+  streams crashed (#116, #249, #200). A file with an empty user
+  password opens without one. Otherwise pass the user or owner
+  password as `password=`. A wrong or missing password, or an
+  unsupported security handler, raises the new `PdfDecryptionError`
+  (a `PdfParseError`) instead of returning ciphertext. `decrypt=True`
+  now only reads every object up front.
+- Strings are decrypted as well as streams (#123). Cross-reference
+  streams, signature `/Contents`, and the XMP metadata stream when
+  `/EncryptMetadata` is false are left as stored. A stream's own
+  `/Crypt` filter is honoured and then removed.
+- A copy written from an encrypted file is a complete unencrypted PDF:
+  its trailer has no `/Encrypt`.
+- A damaged encrypted file whose cross-reference data has to be
+  rebuilt now reads the objects in its object streams. Before, it had
+  no pages.
+
 ### Writer and objects
 
 - Fixed invalid escape sequences in `pdfrw.objects.pdfstring`

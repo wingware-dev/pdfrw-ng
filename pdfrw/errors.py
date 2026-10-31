@@ -38,6 +38,12 @@ class PdfParseError(PdfError):
     "Error thrown by parser/tokenizer"
 
 
+class PdfDecryptionError(PdfParseError):
+    """An encrypted file cannot be decrypted: the password is wrong or
+    missing, the encryption method is not supported, or AES needs
+    pycryptodome, which is not installed."""
+
+
 class PdfOutputError(PdfError):
     "Error thrown by PDF writer"
 

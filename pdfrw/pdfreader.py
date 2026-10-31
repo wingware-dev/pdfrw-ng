@@ -208,15 +208,28 @@ class PdfReader(PdfDict):
             An object that cannot be parsed, such as one cut off by the
             end of the file (#145), logs an error and reads as None (or
             as far as it was parsed), instead of failing the whole read.
+
+            In an encrypted file the object is decrypted as it is read
+            (#48, #123).
         '''
+        pending = isinstance(self.indirect_objects.get(key), PdfIndirect)
         try:
-            return self._loadindirect(key)
+            result = self._loadindirect(key)
         except (PdfParseError, StopIteration) as exc:
             log.error('Could not read PDF object %d %d: %s', key[0], key[1],
                       exc or 'unexpected end of file')
             self.deferred_objects.discard(key)
             result = self.indirect_objects.get(key)
-            return None if isinstance(result, PdfIndirect) else result
+            if isinstance(result, PdfIndirect):
+                return None
+        handler = self.crypt_handler
+        if pending and result is not None and handler is not None:
+            key = tuple(key)
+            decrypted = handler.decrypt_object(result, key)
+            if decrypted is not result:
+                decrypted.indirect = key
+                self.indirect_objects[key] = result = decrypted
+        return result
 
     def _loadindirect(self, key, PdfDict=PdfDict, isinstance=isinstance):
         result = self.indirect_objects.get(key)
@@ -307,12 +320,10 @@ class PdfReader(PdfDict):
                 self.loadindirect(key)
 
     def decrypt_all(self):
+        ''' Read every object.  Objects are decrypted as they are read,
+            so this only makes sure that all of them have been.
+        '''
         self.read_all()
-
-        if self.crypt_filters is not None:
-            crypt.decrypt_objects(
-                self.indirect_objects.values(), self.stream_crypt_filter,
-                self.crypt_filters)
 
     def uncompress(self):
         self.read_all()
@@ -339,10 +350,8 @@ class PdfReader(PdfDict):
                             ', '.join(str(n) for n, _ in members))
                 continue
 
-            # Decrypt
-            if self.crypt_filters is not None:
-                crypt.decrypt_objects(
-                    [obj], self.stream_crypt_filter, self.crypt_filters)
+            # The stream was decrypted when it was read; the objects in
+            # it are not encrypted themselves.
 
             # Decompress
             if not uncompress([obj]):
@@ -653,6 +662,10 @@ class PdfReader(PdfDict):
             if not any(PdfName.Encrypt in t for t in trailers):
                 for objnum, entry in self._scan_object_streams(scan):
                     merged.setdefault(objnum, entry)
+            else:
+                # Encrypted object streams can be scanned only once
+                # decryption is set up: see `_add_scanned_object_streams`.
+                self.private.encrypted_scan = scan
 
         offsets = {}
         object_streams = {}
@@ -779,6 +792,23 @@ class PdfReader(PdfDict):
                 log.warning('Cannot read the header of object stream %d',
                             num)
 
+    def _add_scanned_object_streams(self, scan, offsets, object_streams):
+        ''' Add the members of the object streams that `scan` found to
+            `object_streams`, for object numbers that nothing else
+            lists.  For a damaged encrypted file, whose object streams
+            can be read only after decryption is set up.
+        '''
+        known = set(num for num, _ in offsets)
+        for members in object_streams.values():
+            known.update(num for num, _ in members)
+        for objnum, (_, stmnum, index) in self._scan_object_streams(scan):
+            if objnum and objnum not in known:
+                known.add(objnum)
+                object_streams.setdefault(stmnum, []).append(
+                    (objnum, index))
+        for members in object_streams.values():
+            members.sort(key=lambda member: member[1])
+
     def _read_xref_stm(self, source, location, entries):
         ''' Add the entries of a hybrid file's /XRefStm stream to
             `entries`, without overriding the table's own.
@@ -903,59 +933,23 @@ class PdfReader(PdfDict):
         return result
 
     def _parse_encrypt_info(self, source, password, trailer):
-        """Check password and initialize crypt filters."""
-        # Create and check password key
-        key = crypt.create_key(password, trailer)
+        ''' Check the password and set up decryption.
 
-        if not crypt.check_user_password(key, trailer):
-            source.warning('User password does not validate')
-
-        # Create default crypt filters
+            Raises PdfDecryptionError when the password is neither the
+            user nor the owner password (an empty password opens files
+            that have an empty user password), or when the encryption
+            is not supported.  Objects read until now -- the /Encrypt
+            dictionary and anything it refers to -- are not encrypted
+            and are left as they are; every object read after this is
+            decrypted as it is read.
+        '''
+        handler = crypt.SecurityHandler(trailer.Encrypt, trailer.ID,
+                                        password)
         private = self.private
-        crypt_filters = self.crypt_filters
-        version = int(trailer.Encrypt.V or 0)
-        if version in (1, 2):
-            crypt_filter = crypt.RC4CryptFilter(key)
-            private.stream_crypt_filter = crypt_filter
-            private.string_crypt_filter = crypt_filter
-        elif version == 4:
-            if PdfName.CF in trailer.Encrypt:
-                for name, params in iteritems(trailer.Encrypt.CF):
-                    if name == PdfName.Identity:
-                        continue
-
-                    cfm = params.CFM
-                    if cfm == PdfName.AESV2:
-                        crypt_filters[name] = crypt.AESCryptFilter(key)
-                    elif cfm == PdfName.V2:
-                        crypt_filters[name] = crypt.RC4CryptFilter(key)
-                    else:
-                        source.warning(
-                            'Unsupported crypt filter: {}, {}'.format(
-                                name, cfm))
-
-            # Read default stream filter
-            if PdfName.StmF in trailer.Encrypt:
-                name = trailer.Encrypt.StmF
-                if name in crypt_filters:
-                    private.stream_crypt_filter = crypt_filters[name]
-                else:
-                    source.warning(
-                        'Invalid crypt filter name in /StmF:'
-                        ' {}'.format(name))
-
-            # Read default string filter
-            if PdfName.StrF in trailer.Encrypt:
-                name = trailer.Encrypt.StrF
-                if name in crypt_filters:
-                    private.string_crypt_filter = crypt_filters[name]
-                else:
-                    source.warning(
-                        'Invalid crypt filter name in /StrF:'
-                        ' {}'.format(name))
-        else:
-            source.warning(
-                'Unsupported Encrypt version: {}'.format(version))
+        private.crypt_filters = handler.filters
+        private.stream_crypt_filter = handler.stream_filter
+        private.string_crypt_filter = handler.string_filter
+        private.crypt_handler = handler
 
     def __init__(self, fname=None, fdata=None, decompress=False,
                  decrypt=False, password='', disable_gc=True, verbose=True):
@@ -1044,22 +1038,19 @@ class PdfReader(PdfDict):
 
             # Handle document encryption, from the newest trailer (#179),
             # before object streams are read, since they may need
-            # decrypting.
+            # decrypting.  An encrypted file is always decrypted, whatever
+            # `decrypt` says, as reading it without decrypting gave
+            # objects and streams of ciphertext, which a copy wrote out
+            # as plaintext: blank pages (#48).  Without the password it
+            # raises PdfDecryptionError instead.
             private.crypt_filters = None
-            if decrypt and PdfName.Encrypt in trailer:
-                identity_filter = crypt.IdentityCryptFilter()
-                crypt_filters = {
-                    PdfName.Identity: identity_filter
-                }
-                private.crypt_filters = crypt_filters
-                private.stream_crypt_filter = identity_filter
-                private.string_crypt_filter = identity_filter
-
-                if not crypt.HAS_CRYPTO:
-                    raise PdfParseError(
-                        'Install PyCrypto to enable encryption support')
-
+            private.crypt_handler = None
+            if PdfName.Encrypt in trailer:
                 self._parse_encrypt_info(source, password, trailer)
+                scan = vars(self).pop('encrypted_scan', None)
+                if scan is not None and self.crypt_handler is not None:
+                    self._add_scanned_object_streams(scan, offsets,
+                                                     object_streams)
 
             self.load_stream_objects(object_streams)
 
@@ -1067,9 +1058,12 @@ class PdfReader(PdfDict):
                     float(trailer.Version) > float(self.version)):
                 self.private.version = trailer.Version
 
+            if self.crypt_handler is not None:
+                # Every object is decrypted as it is read, so a copy is
+                # written unencrypted.
+                trailer.Encrypt = None
             if decrypt:
                 self.decrypt_all()
-                trailer.Encrypt = None
 
             self.update(trailer)
 

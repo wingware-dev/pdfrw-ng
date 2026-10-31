@@ -442,9 +442,9 @@ Even as a pure PDF container library, pdfrw comes up a bit short. It
 does not currently support:
 
 -  Most compression/decompression filters
--  Many forms of encryption (``PdfReader(..., decrypt=True)`` handles
-   only some standard security handlers; see `CHANGELOG.md`__ for
-   what this fork has added)
+-  Encryption other than the standard (password) security handler,
+   such as certificate encryption; see `CHANGELOG.md`__ for what this
+   fork has added
 
 __ CHANGELOG.md
 
@@ -633,8 +633,14 @@ for decompressing all the objects in the file.  pdfrw does not currently
 have very many options for decompression, so this is not all that useful,
 except in the specific case of compressed object streams.
 
-Passing ``decrypt=True`` (with ``password=`` if the file needs one)
-decrypts files that use the standard security handlers pdfrw supports.
+Encrypted files are decrypted as they are read: RC4 (40 to 128 bit)
+always, and AES-128 and AES-256 with the ``crypto`` extra.  A file
+anyone can open needs no password; otherwise pass the user or owner
+password as ``PdfReader(..., password='...')``.  Without it, or when
+the encryption is not supported, PdfReader raises
+``PdfDecryptionError`` (a ``PdfParseError``).  A copy written from the
+reader is not encrypted.  ``decrypt=True`` is still accepted; it now
+only reads every object up front.
 If you have PDF files that are encrypted in other ways or heavily
 compressed, you may find that using another program like pdftk or qpdf
 on them can make them readable by pdfrw.
