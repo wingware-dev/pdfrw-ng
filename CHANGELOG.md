@@ -16,6 +16,25 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
 
 ### Reader
 
+- After an incremental update, pdfrw could show pages from an older
+  revision: objects in object streams were loaded before newer xref
+  sections were merged, so an old member overrode its newer version.
+  All xref sections are now merged, newest first, before any object
+  stream is read (#121, #177, #188, #223, #237, #181).
+- Hybrid-reference files are read: the `/XRefStm` stream a table
+  trailer points to is followed. Before, objects listed only there
+  were missing, often leaving 0 pages.
+- `/Encrypt` is taken from the newest trailer, after the merge, and
+  before object streams are read. In linearized encrypted files the
+  oldest trailer has no `/Encrypt`, so pdfrw never decrypted them
+  (#179).
+- The reader's trailer entries come from the newest trailer that has
+  each, and no longer include the per-section keys `/Prev`,
+  `/XRefStm`, `/W`, `/Index` and the xref stream's filter keys, which
+  a copy wrote into its own trailer.
+- A `/Prev` chain that loops back on itself is read once, with a
+  warning, instead of hanging.
+
 ### Encryption
 
 ### Writer and objects

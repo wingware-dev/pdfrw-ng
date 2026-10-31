@@ -12,7 +12,6 @@ of the object.
 '''
 import gc
 import binascii
-import collections
 import itertools
 
 from .errors import PdfParseError, log
@@ -280,47 +279,63 @@ class PdfReader(PdfDict):
         uncompress(self.indirect_objects.values())
 
     def load_stream_objects(self, object_streams):
-        # read object streams
-        objs = []
-        for num in object_streams:
-            obj = self.findindirect(num, 0).real_value()
-            assert obj.Type == '/ObjStm'
-            objs.append(obj)
+        ''' Load the members of object streams.
 
-        # read objects from stream
-        if objs:
+            `object_streams` maps the number of each object stream to a
+            list of ``(objnum, index)`` pairs: the members the merged
+            cross-reference data says live in that stream.  Only those
+            are loaded, so a member left over from an older revision
+            never replaces a newer version of the object (#121).
+        '''
+        for num in sorted(object_streams):
+            members = object_streams[num]
+            obj = self.findindirect(num, 0).real_value()
+            if not isinstance(obj, PdfDict) or obj.Type != PdfName.ObjStm:
+                log.warning('Object %d is not an object stream; cannot '
+                            'load objects %s from it', num,
+                            ', '.join(str(n) for n, _ in members))
+                continue
+
             # Decrypt
             if self.crypt_filters is not None:
                 crypt.decrypt_objects(
-                    objs, self.stream_crypt_filter, self.crypt_filters)
+                    [obj], self.stream_crypt_filter, self.crypt_filters)
 
             # Decompress
-            uncompress(objs)
+            if not uncompress([obj]):
+                log.warning('Could not decompress object stream %d', num)
+                continue
 
-            for obj in objs:
-                objsource = PdfTokens(obj.stream, 0, False)
-                next = objsource.next
-                offsets = []
-                firstoffset = int(obj.First)
-                while objsource.floc < firstoffset:
-                    offsets.append((int(next()), firstoffset + int(next())))
-                for num, offset in offsets:
-                    # Read the object, and call special code if it starts
-                    # an array or dictionary
-                    objsource.floc = offset
-                    sobj = next()
-                    func = self.special.get(sobj)
-                    if func is not None:
-                        sobj = func(objsource)
+            objsource = PdfTokens(obj.stream, 0, False)
+            next = objsource.next
+            header = {}
+            firstoffset = int(obj.First)
+            count = int(obj.N) if obj.N is not None else firstoffset
+            for _ in range(count):
+                if objsource.floc >= firstoffset:
+                    break
+                member = int(next())
+                header.setdefault(member, firstoffset + int(next()))
+            for objnum, index in members:
+                offset = header.get(objnum)
+                if offset is None:
+                    log.warning('Object %d is not in object stream %d',
+                                objnum, num)
+                    continue
+                # Read the object, and call special code if it starts
+                # an array or dictionary
+                objsource.floc = offset
+                sobj = next()
+                func = self.special.get(sobj)
+                if func is not None:
+                    sobj = func(objsource)
 
-                    key = (num, 0)
-                    self.indirect_objects[key] = sobj
-                    if key in self.deferred_objects:
-                        self.deferred_objects.remove(key)
+                key = (objnum, 0)
+                self.indirect_objects[key] = sobj
+                self.deferred_objects.discard(key)
 
-                    # Mark the object as indirect, and
-                    # add it to the list of streams if it starts a stream
-                    sobj.indirect = key
+                # Mark the object as indirect
+                sobj.indirect = key
 
     def findxref(self, fdata):
         ''' Find the cross reference section at the end of a file
@@ -338,11 +353,16 @@ class PdfReader(PdfDict):
             source.exception('Expected %%EOF')
         return startloc, PdfTokens(fdata, int(tableloc), True, self.verbose)
 
-    def parse_xref_stream(self, source, int=int, range=range,
+    def parse_xref_stream(self, source, entries=None, int=int, range=range,
                           enumerate=enumerate, islice=itertools.islice,
-                          defaultdict=collections.defaultdict,
                           hexlify=binascii.hexlify):
         ''' Parse (one of) the cross-reference file section(s)
+
+            Each entry goes into `entries`, keyed by object number, as
+            an xref stream row: ``(1, offset, gen)`` for an object in the
+            file, ``(2, objstm_num, index)`` for one in an object stream,
+            or ``(0, 0, gen)`` for a free entry.  Within one section the
+            first entry for a number wins.
         '''
 
         def readint(s, lengths):
@@ -352,7 +372,9 @@ class PdfReader(PdfDict):
                 yield int(hexlify(s[offset:next]), 16) if length else None
                 offset = next
 
-        setdefault = source.obj_offsets.setdefault
+        if entries is None:
+            entries = {}
+        setdefault = entries.setdefault
         next = source.next
         # check for xref stream object
         objid = source.multiple(3)
@@ -380,25 +402,29 @@ class PdfReader(PdfDict):
         entry_sizes = [int(x) for x in obj.W]
         if len(entry_sizes) != 3:
             source.exception('Invalid entry size')
-        object_streams = defaultdict(list)
         get = readint(stream, entry_sizes)
         for objnum, size in num_pairs:
             for cnt in range(size):
                 xtype, p1, p2 = islice(get, 3)
                 if xtype in (1, None):
                     if p1:
-                        setdefault((objnum, p2 or 0), p1)
+                        setdefault(objnum, (1, p1, p2 or 0))
                 elif xtype == 2:
-                    object_streams[p1].append((objnum, p2))
+                    setdefault(objnum, (2, p1, p2 or 0))
+                elif xtype == 0:
+                    setdefault(objnum, (0, 0, p2 or 0))
                 objnum += 1
 
-        obj.private.object_streams = object_streams
         return obj
 
-    def parse_xref_table(self, source, int=int, range=range):
+    def parse_xref_table(self, source, entries=None, int=int, range=range):
         ''' Parse (one of) the cross-reference file section(s)
+
+            Entries go into `entries` as `parse_xref_stream` describes.
         '''
-        setdefault = source.obj_offsets.setdefault
+        if entries is None:
+            entries = {}
+        setdefault = entries.setdefault
         next = source.next
         # plain xref table
         start = source.floc
@@ -414,8 +440,10 @@ class PdfReader(PdfDict):
                     inuse = next()
                     if inuse == 'n':
                         if offset != 0:
-                            setdefault((objnum, generation), offset)
-                    elif inuse != 'f':
+                            setdefault(objnum, (1, offset, generation))
+                    elif inuse == 'f':
+                        setdefault(objnum, (0, 0, generation))
+                    else:
                         raise ValueError
         except:
             pass
@@ -432,7 +460,9 @@ class PdfReader(PdfDict):
                     offset, generation, inuse = (int(tokens[0]),
                                                  int(tokens[1]), tokens[2])
                     if offset != 0 and inuse == 'n':
-                        setdefault((objnum, generation), offset)
+                        setdefault(objnum, (1, offset, generation))
+                    elif inuse == 'f':
+                        setdefault(objnum, (0, 0, generation))
                     objnum += 1
                 elif tokens:
                     log.error('Invalid line in xref table: %s' %
@@ -445,8 +475,11 @@ class PdfReader(PdfDict):
             source.floc = start
             source.exception('Invalid table format')
 
-    def parsexref(self, source):
+    def parsexref(self, source, entries=None):
         ''' Parse (one of) the cross-reference file section(s)
+
+            Returns ``(trailer, is_stream)``, and adds the section's
+            entries to `entries` (see `parse_xref_stream`).
         '''
         next = source.next
         try:
@@ -454,15 +487,109 @@ class PdfReader(PdfDict):
         except StopIteration:
             tok = ''
         if tok.isdigit():
-            return self.parse_xref_stream(source), True
+            return self.parse_xref_stream(source, entries), True
         elif tok == 'xref':
-            self.parse_xref_table(source)
+            self.parse_xref_table(source, entries)
             tok = next()
             if tok != '<<':
                 source.exception('Expected "<<" starting catalog')
             return self.readdict(source), False
         else:
             source.exception('Expected "xref" keyword or xref stream object')
+
+    # Keys that describe one xref section rather than the document; they
+    # are never copied into the merged trailer.
+    _xref_section_keys = frozenset(PdfName(name) for name in (
+        'Prev', 'XRefStm', 'Type', 'W', 'Index', 'Length', 'Filter',
+        'DecodeParms', 'F', 'FFilter', 'FDecodeParms', 'DL'))
+
+    def read_xref_sections(self, source):
+        ''' Read every cross-reference section, newest first.
+
+            Starts at `source`'s position (the newest section) and
+            follows /Prev, and in hybrid-reference files each table's
+            /XRefStm stream.  An object number takes its entry from the
+            newest section that lists it in use, whether as an offset
+            or as an object stream member; free entries are ignored.
+            Within a hybrid section the table comes before its /XRefStm
+            stream, as PDF 32000-1 7.5.8.4 says.
+
+            Returns ``(offsets, object_streams, trailer)``:
+            `offsets` maps ``(objnum, gen)`` to a file offset;
+            `object_streams` maps an object stream's number to the
+            ``(objnum, index)`` pairs that live in it; `trailer` is a
+            PdfDict of the document's trailer entries, each from the
+            newest trailer that has it.
+        '''
+        merged = {}
+        trailers = []
+        seen = set()
+        while 1:
+            loc = source.floc
+            if loc in seen:
+                source.warning('Cross-reference sections loop back to '
+                               'offset %d; ignoring the rest', loc)
+                break
+            seen.add(loc)
+            source.obj_offsets = {}
+            entries = {}
+            trailer, is_stream = self.parsexref(source, entries)
+            prev = trailer.Prev
+            if prev is None and not trailers:
+                token = source.next_default()
+                if token != 'startxref':
+                    source.warning('Expected "startxref" '
+                                   'at end of xref table')
+            if not is_stream and trailer.XRefStm is not None:
+                self._read_xref_stm(source, trailer.XRefStm, entries)
+            for objnum, entry in iteritems(entries):
+                # A free entry does not hide an older revision's object:
+                # PDFium and pypdf read it too, and a stray free entry
+                # would otherwise lose content (qpdf reads null instead).
+                if entry[0]:
+                    merged.setdefault(objnum, entry)
+            trailers.append(trailer)
+            if prev is None:
+                break
+            source.floc = int(prev)
+
+        offsets = {}
+        object_streams = {}
+        for objnum, (xtype, field2, field3) in iteritems(merged):
+            if xtype == 1:
+                offsets[(objnum, field3)] = field2
+            elif xtype == 2 and objnum:
+                object_streams.setdefault(field2, []).append(
+                    (objnum, field3))
+        for members in object_streams.values():
+            members.sort(key=lambda member: member[1])
+
+        skip = self._xref_section_keys
+        result = PdfDict()
+        for trailer in reversed(trailers):
+            for key, value in dict.items(trailer):
+                if key not in skip and value is not None:
+                    result[key] = value
+        return offsets, object_streams, result
+
+    def _read_xref_stm(self, source, location, entries):
+        ''' Add the entries of a hybrid file's /XRefStm stream to
+            `entries`, without overriding the table's own.
+        '''
+        floc = source.floc
+        stm_entries = {}
+        try:
+            source.floc = int(location)
+            trailer, is_stream = self.parsexref(source, stm_entries)
+            if not is_stream:
+                source.exception('Expected an xref stream')
+        except (PdfParseError, ValueError) as exc:
+            source.warning('Ignoring /XRefStm at %s: %s', location, exc)
+            return
+        finally:
+            source.floc = floc
+        for objnum, entry in iteritems(stm_entries):
+            entries.setdefault(objnum, entry)
 
     def readpages(self, node):
         pagename = PdfName.Page
@@ -611,23 +738,16 @@ class PdfReader(PdfDict):
             startloc, source = self.findxref(fdata)
             private.source = source
 
-            # Find all the xref tables/streams, and
-            # then deal with them backwards.
-            xref_list = []
-            while 1:
-                source.obj_offsets = {}
-                trailer, is_stream = self.parsexref(source)
-                prev = trailer.Prev
-                if prev is None:
-                    token = source.next()
-                    if token != 'startxref' and not xref_list:
-                        source.warning('Expected "startxref" '
-                                       'at end of xref table')
-                    break
-                xref_list.append((source.obj_offsets, trailer, is_stream))
-                source.floc = int(prev)
+            # Merge every xref section, newest first, before loading
+            # any object, so that each object comes from the newest
+            # revision that lists it (#121, #177, #188, #223, #237, #181).
+            offsets, object_streams, trailer = self.read_xref_sections(
+                source)
+            source.obj_offsets = offsets
 
-            # Handle document encryption
+            # Handle document encryption, from the newest trailer (#179),
+            # before object streams are read, since they may need
+            # decrypting.
             private.crypt_filters = None
             if decrypt and PdfName.Encrypt in trailer:
                 identity_filter = crypt.IdentityCryptFilter()
@@ -644,19 +764,7 @@ class PdfReader(PdfDict):
 
                 self._parse_encrypt_info(source, password, trailer)
 
-            if is_stream:
-                self.load_stream_objects(trailer.object_streams)
-
-            while xref_list:
-                later_offsets, later_trailer, is_stream = xref_list.pop()
-                source.obj_offsets.update(later_offsets)
-                if is_stream:
-                    trailer.update(later_trailer)
-                    self.load_stream_objects(later_trailer.object_streams)
-                else:
-                    trailer = later_trailer
-
-            trailer.Prev = None
+            self.load_stream_objects(object_streams)
 
             if (trailer.Version and
                     float(trailer.Version) > float(self.version)):
@@ -666,14 +774,7 @@ class PdfReader(PdfDict):
                 self.decrypt_all()
                 trailer.Encrypt = None
 
-            if is_stream:
-                self.Root = trailer.Root
-                self.Info = trailer.Info
-                self.ID = trailer.ID
-                self.Size = trailer.Size
-                self.Encrypt = trailer.Encrypt
-            else:
-                self.update(trailer)
+            self.update(trailer)
 
             # self.read_all_indirect(source)
             private.pages = self.readpages(self.Root)
