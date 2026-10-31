@@ -17,6 +17,7 @@ tree/forest of PDF objects.
 '''
 import gc
 import io
+import operator
 
 from .objects import (PdfName, PdfArray, PdfDict, IndirectPdfDict,
                       PdfObject, PdfString)
@@ -383,26 +384,44 @@ class PdfWriter(object):
         self.pagearray = PdfArray()
         self.killobj = {}
 
-    def addpage(self, page):
-        self._trailer = None
+    def addpage(self, page, at_index=None):
+        ''' Add `page` to the pages to write, and return self.
+
+            With `at_index` None (the default) the page goes after the
+            pages added so far.  Otherwise it goes before the page now at
+            `at_index`, as list.insert() places it: 0 makes it the first
+            page, the number of pages added so far makes it the last, and
+            a negative index counts from the end (-1 puts it before the
+            last page).  An index outside that range raises IndexError,
+            and the page is not added.
+        '''
+        pagearray = self.pagearray
+        if at_index is not None:
+            at_index = operator.index(at_index)
+            if not -len(pagearray) <= at_index <= len(pagearray):
+                raise IndexError('at_index %d is out of range for %d '
+                                 'pages' % (at_index, len(pagearray)))
         if page.Type != PdfName.Page:
             raise PdfOutputError('Bad /Type:  Expected %s, found %s'
                                  % (PdfName.Page, page.Type))
+        self._trailer = None
         inheritable = page.inheritable  # searches for resources
-        self.pagearray.append(
-            IndirectPdfDict(
-                page,
-                Resources=inheritable.Resources,
-                MediaBox=inheritable.MediaBox,
-                CropBox=inheritable.CropBox,
-                Rotate=inheritable.Rotate,
-            )
+        new_page = IndirectPdfDict(
+            page,
+            Resources=inheritable.Resources,
+            MediaBox=inheritable.MediaBox,
+            CropBox=inheritable.CropBox,
+            Rotate=inheritable.Rotate,
         )
+        if at_index is None:
+            pagearray.append(new_page)
+        else:
+            pagearray.insert(at_index, new_page)
 
         # Add parents in the hierarchy to objects we
         # don't want to output
         killobj = self.killobj
-        obj, new_obj = page, self.pagearray[-1]
+        obj, new_obj = page, new_page
         while obj is not None:
             objid = id(obj)
             if objid in killobj:

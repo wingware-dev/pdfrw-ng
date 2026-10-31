@@ -167,6 +167,10 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   catch it, and it is raised when compressing or encrypting too (#160).
   `PdfOutputError` and `PdfOutputEncodingError` are now exported from
   `pdfrw`.
+- `PdfWriter.addpage` takes an optional `at_index`, to insert the page
+  before the page now at that index instead of appending it, as
+  `list.insert` places it. Negative indexes count from the end; one out
+  of range raises IndexError (upstream PR #216 by @Lucas-C).
 
 ### PageMerge, findobjs and logging
 

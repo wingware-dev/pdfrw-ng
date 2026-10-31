@@ -240,3 +240,51 @@ def test_cr_in_literal_string_survives():
     assert info['/Title'].get_original_bytes() == CR_BYTES
 
     assert PdfReader(fdata=data).Info.Title.to_bytes() == CR_BYTES
+
+
+# -- upstream PR #216: PdfWriter.addpage(page, at_index) ----------------------
+
+def two_writers():
+    """A writer holding the 3 generated pages, and a 4th page to add."""
+    writer = PdfWriter()
+    writer.addpages(reader().pages)
+    extra = PdfReader(fdata=make_pdf(1, labels=['Extra'])).pages[0]
+    return writer, extra
+
+
+@pytest.mark.parametrize('at_index, position', [
+    (None, 3), (0, 0), (1, 1), (3, 3), (-1, 2), (-3, 0)])
+def test_addpage_at_index(at_index, position):
+    writer, extra = two_writers()
+    assert writer.addpage(extra, at_index=at_index) is writer
+    expected = list(TEXTS)
+    expected.insert(position, 'Extra')
+    assert_valid(write_bytes(writer), texts=expected)
+
+
+def test_addpage_at_index_after_trailer_built():
+    """Inserting after the trailer was built rebuilds it, as appending
+    always did."""
+    writer, extra = two_writers()
+    assert writer.trailer.Root.Pages.Count == '3'
+    writer.addpage(extra, at_index=0)
+    assert writer.trailer.Root.Pages.Count == '4'
+    assert_valid(write_bytes(writer), texts=['Extra'] + TEXTS)
+
+
+@pytest.mark.parametrize('at_index', [4, -4, 100])
+def test_addpage_at_index_out_of_range(at_index):
+    writer, extra = two_writers()
+    with pytest.raises(IndexError):
+        writer.addpage(extra, at_index=at_index)
+    assert len(writer.pagearray) == 3
+    assert id(extra) not in writer.killobj
+    assert_valid(write_bytes(writer), texts=TEXTS)
+
+
+@pytest.mark.parametrize('at_index', [1.0, '1'])
+def test_addpage_at_index_must_be_an_integer(at_index):
+    writer, extra = two_writers()
+    with pytest.raises(TypeError):
+        writer.addpage(extra, at_index=at_index)
+    assert len(writer.pagearray) == 3
