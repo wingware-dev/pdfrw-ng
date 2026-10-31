@@ -80,6 +80,12 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   loses only its destination.
   `/PageLabels` are renumbered so that every page left keeps its label;
   a labelling range the page was in the middle of is split.
+- An indirect object holding just a number or other bare token, such as
+  `4 0 obj 612 endobj`, no longer turns every equal token read from the
+  same file or object stream into a reference: a page's
+  `/MediaBox [0 0 612 792]` was written as `[0 0 4 0 R 792]`. The
+  tokenizer no longer shares one object among equal tokens (upstream PR
+  #169 by @mjbryant).
 
 ### Encryption
 

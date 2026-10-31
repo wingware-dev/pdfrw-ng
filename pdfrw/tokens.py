@@ -84,8 +84,6 @@ class PdfTokens(object):
         # Use the position set by __init__ or a later seek (floc), so a
         # seek made before the first token is not lost.
         current = self.current
-        cache = {}
-        get_cache = cache.get
         while 1:
             for match in findtok(fdata, current[0][1]):
                 current[0] = tokspan = match.span()
@@ -143,10 +141,10 @@ class PdfTokens(object):
                         self.exception(('Tokenizer logic incorrect -- '
                                         'should never get here'))
 
-                newtok = get_cache(token)
-                if newtok is None:
-                    newtok = cache[token] = toktype(token)
-                yield newtok
+                # A fresh object for each token: the reader sets
+                # .indirect on a bare-token indirect object, which must
+                # not reach every equal token in the file (PR #169).
+                yield toktype(token)
                 if current[0] is not tokspan:
                     break
             else:

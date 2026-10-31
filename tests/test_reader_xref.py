@@ -317,6 +317,39 @@ def test_objstm_member_missing_from_stream(caplog):
                for r in caplog.records)
 
 
+# -- bare-token indirect objects (upstream PR #169) ------------------------
+
+@pytest.mark.parametrize('objstm', [False, True])
+def test_bare_number_object_stays_out_of_equal_tokens(objstm):
+    """`N 0 obj 612 endobj` marks only that object indirect, not every
+    other 612 in the file (or object stream), which a write would turn
+    into `N 0 R`: /MediaBox [0 0 612 792] became [0 0 N 0 R 792]."""
+    builder = PdfBuilder()
+    cat, pages, page, width = (builder.alloc() for _ in range(4))
+    builder.obj(b'<< /Type /Catalog /Pages %d 0 R >>' % pages, num=cat)
+    page_obj = (b'<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] '
+                b'/Resources << >> /W %d 0 R >>' % (pages, width))
+    pages_obj = b'<< /Type /Pages /Kids [%d 0 R] /Count 1 >>' % page
+    if objstm:
+        builder.objstm([(width, b'612'), (page, page_obj),
+                        (pages, pages_obj)])
+        builder.xref_stream(trailer=b'/Root %d 0 R' % cat)
+    else:
+        builder.obj(b'612', num=width)
+        builder.obj(page_obj, num=page)
+        builder.obj(pages_obj, num=pages)
+        builder.xref_table(trailer=b'/Root %d 0 R' % cat)
+    reader = read(builder.getvalue())
+    mediabox = reader.pages[0].MediaBox
+    assert mediabox == ['0', '0', '612', '792']
+    assert not any(getattr(x, 'indirect', False) for x in mediabox)
+    assert reader.pages[0].W == '612'
+    assert reader.pages[0].W.indirect == (width, 0)
+    data = written(reader)
+    assert b'/MediaBox [0 0 612 792]' in data
+    assert_valid(data, pages=1)
+
+
 # -- exceptions the xref table parser must not swallow (upstream PR #256) --
 
 class _InterruptedFdata(str):
