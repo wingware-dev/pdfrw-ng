@@ -227,6 +227,9 @@ The distribution is named `pdfrw-ng`; the import name is still `pdfrw`.
   (three by three) pages on each output page, using a new `grid()`
   helper in `examples/pagetools.py`; a partly filled last sheet is the
   same size as the others (upstream PR #248 by @mjbright).
+- `4up.py` now uses the same `grid()` helper, so a last sheet holding
+  one page is no longer half as wide, and it prints its usage instead
+  of a traceback when given the wrong arguments.
 
 ### Packaging
 

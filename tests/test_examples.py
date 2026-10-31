@@ -149,11 +149,20 @@ def quadrant_texts(data):
         doc.close()
 
 
-def test_4up(work):
-    work.run('4up.py', work.pdf(8))
-    data = work.read('4up.p8.pdf')
+@pytest.mark.parametrize('npages, last', [
+    (8, labels(5, 6, 7, 8)),
+    (6, labels(5, 6) + ['', '']),
+    (5, labels(5) + ['', '', '']),
+])
+def test_4up(work, npages, last):
+    """A partly filled last sheet is as big as the others.  A last sheet
+    with one page used to come out half as wide."""
+    work.run('4up.py', work.pdf(npages))
+    data = work.read('4up.p%d.pdf' % npages)
     assert_valid(data, pages=2)
-    assert quadrant_texts(data) == [labels(1, 2, 3, 4), labels(5, 6, 7, 8)]
+    size = (WIDTH, HEIGHT)
+    assert grid_layout(data, 2, 2) == [
+        (size, labels(1, 2, 3, 4)), (size, last)]
 
 
 def grid_layout(data, columns, rows):
@@ -198,7 +207,7 @@ def test_n_up(work, script, columns, rows, npages):
         (size, rest + [''] * (per_sheet - len(rest)))]
 
 
-@pytest.mark.parametrize('script', ['6up.py', '9up.py'])
+@pytest.mark.parametrize('script', ['4up.py', '6up.py', '9up.py'])
 def test_n_up_usage(work, script):
     assert_refused(work.run(script, ok=False), 'usage:')
 
