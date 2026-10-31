@@ -11,7 +11,10 @@ against the unmodified upstream import (commit 9fd415d, upstream
 PDFs come from tests/pdfgen.py.  Pages are rendered with pypdfium2
 (PDFium), never with pdfrw, so the pictures show what a real viewer
 shows.  Each PNG is captioned and has three rows: the input as PDFium
-sees it, upstream pdfrw's output, and this tree's output.
+sees it, upstream pdfrw's output, and this tree's output.  The writer
+shots (#135, #147) have no page image to show, so their first row is
+the program both versions ran and the others are text panels with what
+each run wrote, checked with qpdf (via pikepdf).
 
 The coverage shot runs upstream's offline tests against upstream pdfrw
 and this tree's whole suite against this tree, and draws line coverage
@@ -26,6 +29,7 @@ import argparse
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -53,6 +57,7 @@ SCALE = 0.25              # 612pt letter page -> 153px wide
 MARGIN = 24
 GAP = 14
 LABEL_W = 300
+LINE_H = 21               # text panel line height
 BG = (255, 255, 255)
 INK = (33, 37, 41)
 MUTED = (108, 117, 125)
@@ -66,15 +71,27 @@ def font(size):
     return ImageFont.load_default(size=size)
 
 
+def mono_font(size):
+    """A monospaced font for code and bytes, else the default font."""
+    for name in ('Menlo.ttc', 'DejaVuSansMono.ttf', 'consola.ttf',
+                 'LiberationMono-Regular.ttf'):
+        try:
+            return ImageFont.truetype(name, size)
+        except OSError:
+            continue
+    return font(size)
+
+
 # -- running pdfrw ---------------------------------------------------------
 
 class Run(object):
     """The outcome of one subprocess run."""
 
-    def __init__(self, ok, pdf, message):
+    def __init__(self, ok, pdf, message, stdout=''):
         self.ok = ok          # exit status 0
         self.pdf = pdf        # output bytes, or None if none was written
         self.message = message  # last stderr line: the error or last log
+        self.stdout = stdout
 
 
 COPY = '''
@@ -103,17 +120,19 @@ def run_pdfrw(src, workdir, argv, outname):
     lines = [x for x in proc.stderr.strip().splitlines() if x.strip()]
     # On failure the exception; on success the last thing pdfrw logged
     message = lines[-1] if lines else ''
-    return Run(proc.returncode == 0, pdf, message)
+    return Run(proc.returncode == 0, pdf, message, proc.stdout.strip())
 
 
-def copy_with(src, workdir, data):
-    """Copy `data` with PdfReader/PdfWriter from `src`."""
+def copy_with(src, workdir, data, program=COPY):
+    """Run `program` (by default a plain PdfReader/PdfWriter copy) with
+    pdfrw from `src`, as ``program.py in.pdf out.pdf`` on `data`."""
     with open(os.path.join(workdir, 'in.pdf'), 'wb') as f:
         f.write(data)
-    with open(os.path.join(workdir, 'pdfrw_copy.py'), 'w') as f:
-        f.write(COPY)
-    return run_pdfrw(src, workdir, ['pdfrw_copy.py', 'in.pdf', 'out.pdf'],
-                     'out.pdf')
+    # Not copy.py: that would shadow the standard library's copy module
+    with open(os.path.join(workdir, 'pdfrw_program.py'), 'w') as f:
+        f.write(program)
+    return run_pdfrw(src, workdir,
+                     ['pdfrw_program.py', 'in.pdf', 'out.pdf'], 'out.pdf')
 
 
 # -- rendering -------------------------------------------------------------
@@ -143,14 +162,17 @@ def page_text(data):
 
 
 class Row(object):
-    """One captioned strip of page thumbnails, or an error box."""
+    """One captioned strip of page thumbnails, a text panel (`lines`,
+    drawn in a monospaced font, unwrapped) or an error box."""
 
-    def __init__(self, label, verdict, images=(), error=None, good=None):
+    def __init__(self, label, verdict, images=(), error=None, good=None,
+                 lines=None):
         self.label = label
         self.verdict = verdict
         self.images = list(images)
         self.error = error
         self.good = good      # True green, False red, None neutral
+        self.lines = lines
 
 
 def run_row(label, run, describe):
@@ -207,16 +229,21 @@ def wrap(draw, text, fnt, width):
 def compose(title, caption, rows, path):
     """Draw `title`, `caption` and `rows` into a PNG at `path`."""
     title_font, text_font, small = font(28), font(17), font(15)
-    thumbs_w = max([sum(im.width for im in r.images) +
-                    GAP * max(len(r.images) - 1, 0) for r in rows] + [460])
-    width = MARGIN * 2 + LABEL_W + thumbs_w
+    mono = mono_font(15)
     scratch = ImageDraw.Draw(Image.new('RGB', (1, 1)))
+    thumbs_w = max([sum(im.width for im in r.images) +
+                    GAP * max(len(r.images) - 1, 0) for r in rows] +
+                   [scratch.textlength(line, font=mono) + 24
+                    for r in rows for line in r.lines or ()] + [460])
+    width = int(MARGIN * 2 + LABEL_W + thumbs_w)
     cap_lines = wrap(scratch, caption, text_font, width - 2 * MARGIN)
 
     heights = []
     for r in rows:
         if r.images:
             heights.append(max(im.height for im in r.images) + 22)
+        elif r.lines is not None:
+            heights.append(max(LINE_H * len(r.lines) + 20, 70))
         else:
             heights.append(90)
     height = (MARGIN + 40 + len(cap_lines) * 23 + 16 +
@@ -261,6 +288,14 @@ def compose(title, caption, rows, path):
                            / 2, y + im.height + 3), num, font=small,
                           fill=MUTED)
                 x += im.width + GAP
+        elif r.lines is not None:
+            box = [x, y, width - MARGIN, y + h - 6]
+            outline = {True: GOOD, False: BAD, None: FRAME}[r.good]
+            draw.rectangle(box, fill=PANEL, outline=outline)
+            ty = y + 10
+            for line in r.lines:
+                draw.text((x + 12, ty), line, font=mono, fill=INK)
+                ty += LINE_H
         else:
             box = [x, y, width - MARGIN, y + h - 6]
             draw.rectangle(box, fill=(253, 237, 236), outline=BAD)
@@ -396,6 +431,139 @@ def sheet_layout(data):
         doc.close()
 
 
+# -- writer fixes: no page image, so text panels ---------------------------
+
+def program_row(program):
+    """A neutral Row listing `program`, the code each version ran."""
+    return Row('Program, run with each version as', 'program.py in.pdf '
+               'out.pdf on a 3-page file',
+               lines=program.strip().splitlines())
+
+
+def file_facts(run):
+    """Text panel lines saying what a run printed and wrote."""
+    lines = ['exit status: %s' % ('0' if run.ok else 'error')]
+    if run.stdout:
+        lines += ['stdout: ' + x for x in run.stdout.splitlines()[-2:]]
+    if not run.ok and run.message:
+        lines.append('stderr: ' + run.message)
+    if run.pdf is None:
+        lines.append('out.pdf: not written')
+    else:
+        npages = qpdf_page_count(run.pdf) if run.pdf else None
+        lines.append('out.pdf: %d bytes%s' % (
+            len(run.pdf), '' if npages is None else
+            ', %d pages (read by qpdf)' % npages))
+    return lines
+
+
+STR_KEY = '''
+import sys
+from pdfrw import PdfReader, PdfWriter, PdfDict, PdfString
+src = PdfReader(sys.argv[1])
+try:
+    src.Info = PdfDict()
+    src.Info.update({'Title': PdfString.encode('x')})  # str key
+except Exception as exc:
+    print('update() raised %s: %s' % (type(exc).__name__, exc))
+PdfWriter(sys.argv[2], trailer=src).write()
+'''
+
+
+def shot_str_key(before, out, workdir):
+    data = pdfgen.make_pdf(3)
+    rows = [program_row(STR_KEY)]
+    for label, src in ((BEFORE_LABEL, before), (AFTER_LABEL, ROOT)):
+        run = copy_with(src, workdir, data, STR_KEY)
+        intact = (run.ok and bool(run.pdf) and
+                  qpdf_page_count(run.pdf) == 3)
+        if intact:
+            verdict = 'Wrote an intact 3-page file'
+            if 'update() raised' in run.stdout:
+                verdict = ('update() refused the key at once; ' +
+                           verdict[0].lower() + verdict[1:])
+        elif run.pdf == b'':
+            verdict = 'Crashed mid-write, leaving a 0-byte file'
+        else:
+            verdict = 'Crashed, or wrote a damaged file'
+        rows.append(Row(label, verdict, lines=file_facts(run), good=intact))
+    compose(
+        '#135: a str dictionary key left a 0-byte file',
+        "PdfDict.update() with a plain str key such as 'Title' (instead "
+        "of PdfName.Title) was accepted, and the writer only failed on it "
+        "halfway through writing, after it had already opened and "
+        "truncated out.pdf.  pdfrw-ng's update() and setdefault() reject "
+        "such a key at once, and the writer builds the whole file in "
+        "memory before it opens the target, so a failed write never "
+        "damages it (also #160).",
+        rows, os.path.join(out, 'str-key-write.png'))
+
+
+CR_TITLE = b'a\rb\r\nc'
+
+CR_PROGRAM = '''
+import sys
+from pdfrw import PdfReader, PdfWriter, IndirectPdfDict, PdfString
+src = PdfReader(sys.argv[1])
+src.Info = IndirectPdfDict(Title=PdfString.from_bytes(
+    b'a\\rb\\r\\nc', bytes_encoding='literal'))
+PdfWriter(sys.argv[2], trailer=src).write()
+'''
+
+
+def show_bytes(raw):
+    """`raw` with CR and LF bytes made visible as <CR> and <LF>."""
+    text = raw.decode('latin-1')
+    return text.replace('\r', '<CR>').replace('\n', '<LF>')
+
+
+def written_title(pdf):
+    """The /Title literal string exactly as it appears in the file."""
+    match = re.search(rb'/Title\s*(\((?:\\.|[^\\)])*\))', pdf, re.DOTALL)
+    return match.group(1) if match else None
+
+
+def qpdf_title(pdf):
+    """The /Info /Title bytes as qpdf (via pikepdf) reads them."""
+    import pikepdf
+    with pikepdf.open(io.BytesIO(pdf)) as doc:
+        return bytes(doc.trailer.Info.Title)
+
+
+def shot_cr_in_strings(before, out, workdir):
+    data = pdfgen.make_pdf(3)
+    rows = [program_row(CR_PROGRAM)]
+    for label, src in ((BEFORE_LABEL, before), (AFTER_LABEL, ROOT)):
+        run = copy_with(src, workdir, data, CR_PROGRAM)
+        if not run.ok or not run.pdf:
+            rows.append(Row(label, 'Crashed', lines=file_facts(run),
+                            good=False))
+            continue
+        read = qpdf_title(run.pdf)
+        good = read == CR_TITLE
+        if good:
+            verdict = 'The Title reads back unchanged'
+        elif read == CR_TITLE.replace(b'\r\n', b'\n').replace(b'\r', b'\n'):
+            verdict = 'Every CR came back as LF'
+        else:
+            verdict = 'The Title came back changed'
+        lines = [
+            'title set:     ' + show_bytes(CR_TITLE),
+            'in out.pdf:    /Title ' + show_bytes(written_title(run.pdf)),
+            'qpdf reads:    ' + show_bytes(read),
+        ]
+        rows.append(Row(label, verdict, lines=lines, good=good))
+    compose(
+        '#147: CR in a string was written raw and read back as LF',
+        'A PDF reader must read an unescaped CR or CR LF inside a literal '
+        'string as a single LF (PDF 32000-1, 7.3.4.2).  Upstream pdfrw '
+        'wrote CR bytes into literal strings unescaped, so any string '
+        'holding one, such as a title or form field value, changed on '
+        'the round trip.  pdfrw-ng writes CR as the escape \\r.  '
+        '<CR> and <LF> below stand for the raw bytes.',
+        rows, os.path.join(out, 'cr-in-strings.png'))
+
+
 # -- coverage --------------------------------------------------------------
 
 def measure(src, tests, report):
@@ -492,6 +660,8 @@ SHOTS = {
     'encrypted-copy': shot_encrypted_copy,
     'stale-page-tree': shot_stale_page_tree,
     'booklet-padding': shot_booklet,
+    'str-key-write': shot_str_key,
+    'cr-in-strings': shot_cr_in_strings,
     'coverage': shot_coverage,
 }
 
